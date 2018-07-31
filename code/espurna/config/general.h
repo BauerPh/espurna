@@ -67,11 +67,11 @@
 // nc -ul 8113
 
 #ifndef DEBUG_UDP_SUPPORT
-#define DEBUG_UDP_SUPPORT       0               // Enable UDP debug log
+#define DEBUG_UDP_SUPPORT       1               // Enable UDP debug log
 #endif
 
 #ifndef DEBUG_UDP_IP
-#define DEBUG_UDP_IP            IPAddress(192, 168, 1, 100)
+#define DEBUG_UDP_IP            IPAddress(192, 168, 178, 50)
 #endif
 
 #ifndef DEBUG_UDP_PORT
@@ -491,7 +491,7 @@
 // -----------------------------------------------------------------------------
 
 #ifndef NOFUSS_SUPPORT
-#define NOFUSS_SUPPORT              0          // Do not enable support for NoFuss by default (12.65Kb)
+#define NOFUSS_SUPPORT              1          // Do not enable support for NoFuss by default (12.65Kb)
 #endif
 
 #ifndef NOFUSS_ENABLED
