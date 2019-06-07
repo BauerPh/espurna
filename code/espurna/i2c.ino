@@ -2,7 +2,7 @@
 
 I2C MODULE
 
-Copyright (C) 2017-2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2017-2019 by Xose Pérez <xose dot perez at gmail dot com>
 
 */
 
@@ -230,7 +230,7 @@ uint16_t i2c_read_uint16(uint8_t address, uint8_t reg) {
 void i2c_read_buffer(uint8_t address, uint8_t * buffer, size_t len) {
     Wire.beginTransmission((uint8_t) address);
     Wire.requestFrom(address, (uint8_t) len);
-    for (int i=0; i<len; i++) buffer[i] = Wire.read();
+    for (size_t i=0; i<len; i++) buffer[i] = Wire.read();
     Wire.endTransmission();
 }
 
@@ -332,7 +332,7 @@ unsigned char i2cFind(size_t size, unsigned char * addresses) {
 unsigned char i2cFindAndLock(size_t size, unsigned char * addresses) {
     unsigned char start = 0;
     unsigned char address = 0;
-    while (address = i2cFind(size, addresses, start)) {
+    while ((address = i2cFind(size, addresses, start))) {
         if (i2cGetLock(address)) break;
         start++;
     }
@@ -351,6 +351,20 @@ void i2cScan() {
     if (nDevices == 0) DEBUG_MSG_P(PSTR("[I2C] No devices found\n"));
 }
 
+void i2cCommands() {
+
+    terminalRegisterCommand(F("I2C.SCAN"), [](Embedis* e) {
+        i2cScan();
+        terminalOK();
+    });
+
+    terminalRegisterCommand(F("I2C.CLEAR"), [](Embedis* e) {
+        i2cClearBus();
+        terminalOK();
+    });
+
+}
+
 void i2cSetup() {
 
     unsigned char sda = getSetting("i2cSDA", I2C_SDA_PIN).toInt();
@@ -365,6 +379,10 @@ void i2cSetup() {
     #endif
 
     DEBUG_MSG_P(PSTR("[I2C] Using GPIO%u for SDA and GPIO%u for SCL\n"), sda, scl);
+
+    #if TERMINAL_SUPPORT
+        i2cCommands();
+    #endif
 
     #if I2C_CLEAR_BUS
         i2cClearBus();

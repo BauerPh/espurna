@@ -2,12 +2,11 @@
 
 UTILS MODULE
 
-Copyright (C) 2017-2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2017-2019 by Xose Pérez <xose dot perez at gmail dot com>
 
 */
 
 #include <Ticker.h>
-Ticker _defer_reset;
 
 String getIdentifier() {
     char buffer[20];
@@ -33,6 +32,10 @@ String getBoardName() {
     return getSetting("boardName", DEVICE_NAME);
 }
 
+String getAdminPass() {
+    return getSetting("adminPass", ADMIN_PASS);
+}
+
 String getCoreVersion() {
     String version = ESP.getCoreVersion();
     #ifdef ARDUINO_ESP8266_RELEASE
@@ -52,8 +55,12 @@ String getCoreRevision() {
     #endif
 }
 
-unsigned long maxSketchSpace() {
-    return (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+unsigned char getHeartbeatMode() {
+    return getSetting("hbMode", HEARTBEAT_MODE).toInt();
+}
+
+unsigned char getHeartbeatInterval() {
+    return getSetting("hbInterval", HEARTBEAT_INTERVAL).toInt();
 }
 
 // WTF
@@ -62,6 +69,18 @@ unsigned long maxSketchSpace() {
 unsigned int getFreeHeap() {
     if (getSetting("wtfHeap", 0).toInt() == 1) return 9999;
     return ESP.getFreeHeap();
+}
+
+unsigned int getInitialFreeHeap() {
+    static unsigned int _heap = 0;
+    if (0 == _heap) {
+        _heap = getFreeHeap();
+    }
+    return _heap;
+}
+
+unsigned int getUsedHeap() {
+    return getInitialFreeHeap() - getFreeHeap();
 }
 
 String getEspurnaModules() {
@@ -74,35 +93,23 @@ String getEspurnaSensors() {
 }
 #endif
 
-String buildTime() {
-
-    const char time_now[] = __TIME__;   // hh:mm:ss
-    unsigned int hour = atoi(&time_now[0]);
-    unsigned int minute = atoi(&time_now[3]);
-    unsigned int second = atoi(&time_now[6]);
-
-    const char date_now[] = __DATE__;   // Mmm dd yyyy
-    const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
-    unsigned int month = 0;
-    for ( int i = 0; i < 12; i++ ) {
-        if (strncmp(date_now, months[i], 3) == 0 ) {
-            month = i + 1;
-            break;
-        }
-    }
-    unsigned int day = atoi(&date_now[3]);
-    unsigned int year = atoi(&date_now[7]);
-
-    char buffer[20];
-    snprintf_P(
-        buffer, sizeof(buffer), PSTR("%04d-%02d-%02d %02d:%02d:%02d"),
-        year, month, day, hour, minute, second
-    );
-
-    return String(buffer);
-
+String getEspurnaWebUI() {
+    return FPSTR(espurna_webui);
 }
 
+String buildTime() {
+    #if NTP_SUPPORT
+        return ntpDateTime(__UNIX_TIMESTAMP__);
+    #else
+        char buffer[20];
+        snprintf_P(
+            buffer, sizeof(buffer), PSTR("%04d-%02d-%02d %02d:%02d:%02d"),
+            __TIME_YEAR__, __TIME_MONTH__, __TIME_DAY__,
+            __TIME_HOUR__, __TIME_MINUTE__, __TIME_SECOND__
+        );
+        return String(buffer);
+    #endif
+}
 
 unsigned long getUptime() {
 
@@ -117,14 +124,75 @@ unsigned long getUptime() {
 
 }
 
-#if HEARTBEAT_ENABLED
+// -----------------------------------------------------------------------------
+// Heartbeat helper
+// -----------------------------------------------------------------------------
+namespace Heartbeat {
+    enum Report : uint32_t { 
+        Status = 1 << 1,
+        Ssid = 1 << 2,
+        Ip = 1 << 3,
+        Mac = 1 << 4,
+        Rssi = 1 << 5,
+        Uptime = 1 << 6,
+        Datetime = 1 << 7,
+        Freeheap = 1 << 8,
+        Vcc = 1 << 9,
+        Relay = 1 << 10,
+        Light = 1 << 11,
+        Hostname = 1 << 12,
+        App = 1 << 13,
+        Version = 1 << 14,
+        Board = 1 << 15,
+        Loadavg = 1 << 16,
+        Interval = 1 << 17,
+        Description = 1 << 18,
+        Range = 1 << 19,
+        Remote_temp = 1 << 20
+    };
+
+    constexpr uint32_t defaultValue() {
+        return (Status * (HEARTBEAT_REPORT_STATUS)) | \
+            (Ssid * (HEARTBEAT_REPORT_SSID)) | \
+            (Ip * (HEARTBEAT_REPORT_IP)) | \
+            (Mac * (HEARTBEAT_REPORT_MAC)) | \
+            (Rssi * (HEARTBEAT_REPORT_RSSI)) | \
+            (Uptime * (HEARTBEAT_REPORT_UPTIME)) | \
+            (Datetime * (HEARTBEAT_REPORT_DATETIME)) | \
+            (Freeheap * (HEARTBEAT_REPORT_FREEHEAP)) | \
+            (Vcc * (HEARTBEAT_REPORT_VCC)) | \
+            (Relay * (HEARTBEAT_REPORT_RELAY)) | \
+            (Light * (HEARTBEAT_REPORT_LIGHT)) | \
+            (Hostname * (HEARTBEAT_REPORT_HOSTNAME)) | \
+            (Description * (HEARTBEAT_REPORT_DESCRIPTION)) | \
+            (App * (HEARTBEAT_REPORT_APP)) | \
+            (Version * (HEARTBEAT_REPORT_VERSION)) | \
+            (Board * (HEARTBEAT_REPORT_BOARD)) | \
+            (Loadavg * (HEARTBEAT_REPORT_LOADAVG)) | \
+            (Interval * (HEARTBEAT_REPORT_INTERVAL)) | \
+            (Range * (HEARTBEAT_REPORT_RANGE)) | \
+            (Remote_temp * (HEARTBEAT_REPORT_REMOTE_TEMP));
+    }
+
+    uint32_t currentValue() {
+        const String cfg = getSetting("hbReport");
+        if (!cfg.length()) return defaultValue();
+
+        return strtoul(cfg.c_str(), NULL, 10);
+    }
+
+}
 
 void heartbeat() {
 
     unsigned long uptime_seconds = getUptime();
     unsigned int free_heap = getFreeHeap();
+    
+    UNUSED(uptime_seconds);
+    UNUSED(free_heap);
 
     #if MQTT_SUPPORT
+        unsigned char _heartbeat_mode = getHeartbeatMode();
         bool serial = !mqttConnected();
     #else
         bool serial = true;
@@ -136,7 +204,7 @@ void heartbeat() {
 
     if (serial) {
         DEBUG_MSG_P(PSTR("[MAIN] Uptime: %lu seconds\n"), uptime_seconds);
-        DEBUG_MSG_P(PSTR("[MAIN] Free heap: %lu bytes\n"), free_heap);
+        infoMemory("Heap", getInitialFreeHeap(), getFreeHeap());
         #if ADC_MODE_VALUE == ADC_VCC
             DEBUG_MSG_P(PSTR("[MAIN] Power: %lu mV\n"), ESP.getVcc());
         #endif
@@ -145,63 +213,93 @@ void heartbeat() {
         #endif
     }
 
+    const uint32_t hb_cfg = Heartbeat::currentValue();
+    if (!hb_cfg) return;
+
     // -------------------------------------------------------------------------
     // MQTT
     // -------------------------------------------------------------------------
 
     #if MQTT_SUPPORT
-        if (!serial) {
-            #if (HEARTBEAT_REPORT_INTERVAL)
-                mqttSend(MQTT_TOPIC_INTERVAL, HEARTBEAT_INTERVAL / 1000);
-            #endif
-            #if (HEARTBEAT_REPORT_APP)
+        if (!serial && (_heartbeat_mode == HEARTBEAT_REPEAT || systemGetHeartbeat())) {
+            if (hb_cfg & Heartbeat::Interval)
+                mqttSend(MQTT_TOPIC_INTERVAL, String(getHeartbeatInterval() / 1000).c_str());
+
+            if (hb_cfg & Heartbeat::App)
                 mqttSend(MQTT_TOPIC_APP, APP_NAME);
-            #endif
-            #if (HEARTBEAT_REPORT_VERSION)
+
+            if (hb_cfg & Heartbeat::Version)
                 mqttSend(MQTT_TOPIC_VERSION, APP_VERSION);
-            #endif
-            #if (HEARTBEAT_REPORT_BOARD)
+
+            if (hb_cfg & Heartbeat::Board)
                 mqttSend(MQTT_TOPIC_BOARD, getBoardName().c_str());
-            #endif
-            #if (HEARTBEAT_REPORT_HOSTNAME)
-                mqttSend(MQTT_TOPIC_HOSTNAME, getSetting("hostname").c_str());
-            #endif
-            #if (HEARTBEAT_REPORT_IP)
+
+            if (hb_cfg & Heartbeat::Hostname)
+                mqttSend(MQTT_TOPIC_HOSTNAME, getSetting("hostname", getIdentifier()).c_str());
+
+            if (hb_cfg & Heartbeat::Description) {
+                if (hasSetting("desc")) {
+                    mqttSend(MQTT_TOPIC_DESCRIPTION, getSetting("desc").c_str());
+                }
+            }
+
+            if (hb_cfg & Heartbeat::Ssid)
+                mqttSend(MQTT_TOPIC_SSID, WiFi.SSID().c_str());
+
+            if (hb_cfg & Heartbeat::Ip)
                 mqttSend(MQTT_TOPIC_IP, getIP().c_str());
-            #endif
-            #if (HEARTBEAT_REPORT_MAC)
+
+            if (hb_cfg & Heartbeat::Mac)
                 mqttSend(MQTT_TOPIC_MAC, WiFi.macAddress().c_str());
-            #endif
-            #if (HEARTBEAT_REPORT_RSSI)
+
+            if (hb_cfg & Heartbeat::Rssi)
                 mqttSend(MQTT_TOPIC_RSSI, String(WiFi.RSSI()).c_str());
-            #endif
-            #if (HEARTBEAT_REPORT_UPTIME)
+
+            if (hb_cfg & Heartbeat::Uptime)
                 mqttSend(MQTT_TOPIC_UPTIME, String(uptime_seconds).c_str());
+
+            #if NTP_SUPPORT
+                if ((hb_cfg & Heartbeat::Datetime) && (ntpSynced()))
+                    mqttSend(MQTT_TOPIC_DATETIME, ntpDateTime().c_str());
             #endif
-            #if (HEARTBEAT_REPORT_DATETIME) && (NTP_SUPPORT)
-                if (ntpSynced())  mqttSend(MQTT_TOPIC_DATETIME, ntpDateTime().c_str());
-            #endif
-            #if (HEARTBEAT_REPORT_FREEHEAP)
+
+            if (hb_cfg & Heartbeat::Freeheap)
                 mqttSend(MQTT_TOPIC_FREEHEAP, String(free_heap).c_str());
-            #endif
-            #if (HEARTBEAT_REPORT_RELAY)
+
+            if (hb_cfg & Heartbeat::Relay)
                 relayMQTT();
+
+            #if (LIGHT_PROVIDER != LIGHT_PROVIDER_NONE)
+                if (hb_cfg & Heartbeat::Light)
+                    lightMQTT();
             #endif
-            #if (LIGHT_PROVIDER != LIGHT_PROVIDER_NONE) & (HEARTBEAT_REPORT_LIGHT)
-                lightMQTT();
-            #endif
-            #if (HEARTBEAT_REPORT_VCC)
-            #if ADC_MODE_VALUE == ADC_VCC
+
+            if ((hb_cfg & Heartbeat::Vcc) && (ADC_MODE_VALUE == ADC_VCC))
                 mqttSend(MQTT_TOPIC_VCC, String(ESP.getVcc()).c_str());
-            #endif
-            #endif
-            #if (HEARTBEAT_REPORT_STATUS)
+
+            if (hb_cfg & Heartbeat::Status)
                 mqttSend(MQTT_TOPIC_STATUS, MQTT_STATUS_ONLINE, true);
-            #endif
-            #if (LOADAVG_REPORT)
+
+            if (hb_cfg & Heartbeat::Loadavg)
                 mqttSend(MQTT_TOPIC_LOADAVG, String(systemLoadAverage()).c_str());
+
+            #if THERMOSTAT_SUPPORT
+                if (hb_cfg & Heartbeat::Range) {
+                    mqttSend(MQTT_TOPIC_HOLD_TEMP "_" MQTT_TOPIC_HOLD_TEMP_MIN, String(_temp_range.min).c_str());
+                    mqttSend(MQTT_TOPIC_HOLD_TEMP "_" MQTT_TOPIC_HOLD_TEMP_MAX, String(_temp_range.max).c_str());
+                }
+
+                if (hb_cfg & Heartbeat::Remote_temp) {
+                    char remote_temp[6];
+                    dtostrf(_remote_temp.temp, 1-sizeof(remote_temp), 1, remote_temp);
+                    mqttSend(MQTT_TOPIC_REMOTE_TEMP, String(remote_temp).c_str());
+                }
             #endif
+
+        } else if (!serial && _heartbeat_mode == HEARTBEAT_REPEAT_STATUS) {
+            mqttSend(MQTT_TOPIC_STATUS, MQTT_STATUS_ONLINE, true);
         }
+
     #endif
 
     // -------------------------------------------------------------------------
@@ -209,17 +307,26 @@ void heartbeat() {
     // -------------------------------------------------------------------------
 
     #if INFLUXDB_SUPPORT
-        #if (HEARTBEAT_REPORT_UPTIME)
+        if (hb_cfg & Heartbeat::Uptime)
             idbSend(MQTT_TOPIC_UPTIME, String(uptime_seconds).c_str());
-        #endif
-        #if (HEARTBEAT_REPORT_FREEHEAP)
+
+        if (hb_cfg & Heartbeat::Freeheap)
             idbSend(MQTT_TOPIC_FREEHEAP, String(free_heap).c_str());
-        #endif
+
+        if (hb_cfg & Heartbeat::Rssi)
+            idbSend(MQTT_TOPIC_RSSI, String(WiFi.RSSI()).c_str());
+
+        if ((hb_cfg & Heartbeat::Vcc) && (ADC_MODE_VALUE == ADC_VCC))
+            idbSend(MQTT_TOPIC_VCC, String(ESP.getVcc()).c_str());
+                    
+        if (hb_cfg & Heartbeat::Loadavg)
+            idbSend(MQTT_TOPIC_LOADAVG, String(systemLoadAverage()).c_str());
+
+        if (hb_cfg & Heartbeat::Ssid)
+            idbSend(MQTT_TOPIC_SSID, WiFi.SSID().c_str());
     #endif
 
 }
-
-#endif /// HEARTBEAT_ENABLED
 
 // -----------------------------------------------------------------------------
 // INFO
@@ -249,7 +356,7 @@ void _info_print_memory_layout_line(const char * name, unsigned long bytes, bool
     if (reset) index = 0;
     if (0 == bytes) return;
     unsigned int _sectors = info_bytes2sectors(bytes);
-    DEBUG_MSG_P(PSTR("[INIT] %-20s: %8lu bytes / %4d sectors (%4d to %4d)\n"), name, bytes, _sectors, index, index + _sectors - 1);
+    DEBUG_MSG_P(PSTR("[MAIN] %-20s: %8lu bytes / %4d sectors (%4d to %4d)\n"), name, bytes, _sectors, index, index + _sectors - 1);
     index += _sectors;
 }
 
@@ -257,30 +364,61 @@ void _info_print_memory_layout_line(const char * name, unsigned long bytes) {
     _info_print_memory_layout_line(name, bytes, false);
 }
 
+void infoMemory(const char * name, unsigned int total_memory, unsigned int free_memory) {
+
+    DEBUG_MSG_P(
+        PSTR("[MAIN] %-6s: %5u bytes initially | %5u bytes used (%2u%%) | %5u bytes free (%2u%%)\n"),
+        name,
+        total_memory,
+        total_memory - free_memory,
+        100 * (total_memory - free_memory) / total_memory,
+        free_memory,
+        100 * free_memory / total_memory
+    );
+
+}
+
+const char* _info_wifi_sleep_mode(WiFiSleepType_t type) {
+    switch (type) {
+        case WIFI_NONE_SLEEP: return "NONE";
+        case WIFI_LIGHT_SLEEP: return "LIGHT";
+        case WIFI_MODEM_SLEEP: return "MODEM";
+        default: return "UNKNOWN";
+    }
+}
+
+
 void info() {
 
-    DEBUG_MSG_P(PSTR("\n\n"));
-    if (strlen(APP_REVISION) > 0) {
-        DEBUG_MSG_P(PSTR("[INIT] %s %s (%s)\n"), (char *) APP_NAME, (char *) APP_VERSION, (char *) APP_REVISION);
-    } else {
-        DEBUG_MSG_P(PSTR("[INIT] %s %s\n"), (char *) APP_NAME, (char *) APP_VERSION);
-    }
-    DEBUG_MSG_P(PSTR("[INIT] %s\n"), (char *) APP_AUTHOR);
-    DEBUG_MSG_P(PSTR("[INIT] %s\n\n"), (char *) APP_WEBSITE);
-    DEBUG_MSG_P(PSTR("[INIT] CPU chip ID: 0x%06X\n"), ESP.getChipId());
-    DEBUG_MSG_P(PSTR("[INIT] CPU frequency: %u MHz\n"), ESP.getCpuFreqMHz());
-    DEBUG_MSG_P(PSTR("[INIT] SDK version: %s\n"), ESP.getSdkVersion());
-    DEBUG_MSG_P(PSTR("[INIT] Core version: %s\n"), getCoreVersion().c_str());
-    DEBUG_MSG_P(PSTR("[INIT] Core revision: %s\n"), getCoreRevision().c_str());
+    DEBUG_MSG_P(PSTR("\n\n---8<-------\n\n"));
+
+    // -------------------------------------------------------------------------
+
+    #if defined(APP_REVISION)
+        DEBUG_MSG_P(PSTR("[MAIN] " APP_NAME " " APP_VERSION " (" APP_REVISION ")\n"));
+    #else
+        DEBUG_MSG_P(PSTR("[MAIN] " APP_NAME " " APP_VERSION "\n"));
+    #endif
+    DEBUG_MSG_P(PSTR("[MAIN] " APP_AUTHOR "\n"));
+    DEBUG_MSG_P(PSTR("[MAIN] " APP_WEBSITE "\n\n"));
+    DEBUG_MSG_P(PSTR("[MAIN] CPU chip ID: 0x%06X\n"), ESP.getChipId());
+    DEBUG_MSG_P(PSTR("[MAIN] CPU frequency: %u MHz\n"), ESP.getCpuFreqMHz());
+    DEBUG_MSG_P(PSTR("[MAIN] SDK version: %s\n"), ESP.getSdkVersion());
+    DEBUG_MSG_P(PSTR("[MAIN] Core version: %s\n"), getCoreVersion().c_str());
+    DEBUG_MSG_P(PSTR("[MAIN] Core revision: %s\n"), getCoreRevision().c_str());
+    DEBUG_MSG_P(PSTR("[MAIN] Build time: %lu\n"), __UNIX_TIMESTAMP__);
     DEBUG_MSG_P(PSTR("\n"));
 
     // -------------------------------------------------------------------------
 
     FlashMode_t mode = ESP.getFlashChipMode();
-    DEBUG_MSG_P(PSTR("[INIT] Flash chip ID: 0x%06X\n"), ESP.getFlashChipId());
-    DEBUG_MSG_P(PSTR("[INIT] Flash speed: %u Hz\n"), ESP.getFlashChipSpeed());
-    DEBUG_MSG_P(PSTR("[INIT] Flash mode: %s\n"), mode == FM_QIO ? "QIO" : mode == FM_QOUT ? "QOUT" : mode == FM_DIO ? "DIO" : mode == FM_DOUT ? "DOUT" : "UNKNOWN");
+    UNUSED(mode);
+    DEBUG_MSG_P(PSTR("[MAIN] Flash chip ID: 0x%06X\n"), ESP.getFlashChipId());
+    DEBUG_MSG_P(PSTR("[MAIN] Flash speed: %u Hz\n"), ESP.getFlashChipSpeed());
+    DEBUG_MSG_P(PSTR("[MAIN] Flash mode: %s\n"), mode == FM_QIO ? "QIO" : mode == FM_QOUT ? "QOUT" : mode == FM_DIO ? "DIO" : mode == FM_DOUT ? "DOUT" : "UNKNOWN");
     DEBUG_MSG_P(PSTR("\n"));
+
+    // -------------------------------------------------------------------------
 
     _info_print_memory_layout_line("Flash size (CHIP)", ESP.getFlashChipRealSize(), true);
     _info_print_memory_layout_line("Flash size (SDK)", ESP.getFlashChipSize(), true);
@@ -292,61 +430,88 @@ void info() {
     _info_print_memory_layout_line("Reserved", 4 * SPI_FLASH_SEC_SIZE);
     DEBUG_MSG_P(PSTR("\n"));
 
-    DEBUG_MSG_P(PSTR("[INIT] EEPROM sectors: %s\n"), (char *) eepromSectors().c_str());
-    DEBUG_MSG_P(PSTR("\n"));
-
     // -------------------------------------------------------------------------
 
     #if SPIFFS_SUPPORT
         FSInfo fs_info;
         bool fs = SPIFFS.info(fs_info);
         if (fs) {
-            DEBUG_MSG_P(PSTR("[INIT] SPIFFS total size: %8u bytes / %4d sectors\n"), fs_info.totalBytes, sectors(fs_info.totalBytes));
-            DEBUG_MSG_P(PSTR("[INIT]        used size:  %8u bytes\n"), fs_info.usedBytes);
-            DEBUG_MSG_P(PSTR("[INIT]        block size: %8u bytes\n"), fs_info.blockSize);
-            DEBUG_MSG_P(PSTR("[INIT]        page size:  %8u bytes\n"), fs_info.pageSize);
-            DEBUG_MSG_P(PSTR("[INIT]        max files:  %8u\n"), fs_info.maxOpenFiles);
-            DEBUG_MSG_P(PSTR("[INIT]        max length: %8u\n"), fs_info.maxPathLength);
+            DEBUG_MSG_P(PSTR("[MAIN] SPIFFS total size   : %8u bytes / %4d sectors\n"), fs_info.totalBytes, info_bytes2sectors(fs_info.totalBytes));
+            DEBUG_MSG_P(PSTR("[MAIN]        used size    : %8u bytes\n"), fs_info.usedBytes);
+            DEBUG_MSG_P(PSTR("[MAIN]        block size   : %8u bytes\n"), fs_info.blockSize);
+            DEBUG_MSG_P(PSTR("[MAIN]        page size    : %8u bytes\n"), fs_info.pageSize);
+            DEBUG_MSG_P(PSTR("[MAIN]        max files    : %8u\n"), fs_info.maxOpenFiles);
+            DEBUG_MSG_P(PSTR("[MAIN]        max length   : %8u\n"), fs_info.maxPathLength);
         } else {
-            DEBUG_MSG_P(PSTR("[INIT] No SPIFFS partition\n"));
+            DEBUG_MSG_P(PSTR("[MAIN] No SPIFFS partition\n"));
         }
         DEBUG_MSG_P(PSTR("\n"));
     #endif
 
     // -------------------------------------------------------------------------
 
-    DEBUG_MSG_P(PSTR("[INIT] BOARD: %s\n"), getBoardName().c_str());
-    DEBUG_MSG_P(PSTR("[INIT] SUPPORT: %s\n"), getEspurnaModules().c_str());
-    #if SENSOR_SUPPORT
-        DEBUG_MSG_P(PSTR("[INIT] SENSORS: %s\n"), getEspurnaSensors().c_str());
-    #endif // SENSOR_SUPPORT
-    DEBUG_MSG_P(PSTR("[INIT] WEBUI IMAGE CODE: %u\n"), WEBUI_IMAGE);
+    eepromSectorsDebug();
     DEBUG_MSG_P(PSTR("\n"));
 
     // -------------------------------------------------------------------------
 
-    unsigned char reason = resetReason();
+    infoMemory("EEPROM", SPI_FLASH_SEC_SIZE, SPI_FLASH_SEC_SIZE - settingsSize());
+    infoMemory("Heap", getInitialFreeHeap(), getFreeHeap());
+    infoMemory("Stack", 4096, getFreeStack());
+    DEBUG_MSG_P(PSTR("\n"));
+
+    // -------------------------------------------------------------------------
+
+    DEBUG_MSG_P(PSTR("[MAIN] Boot version: %d\n"), ESP.getBootVersion());
+    DEBUG_MSG_P(PSTR("[MAIN] Boot mode: %d\n"), ESP.getBootMode());
+    unsigned char reason = customResetReason();
     if (reason > 0) {
         char buffer[32];
         strcpy_P(buffer, custom_reset_string[reason-1]);
-        DEBUG_MSG_P(PSTR("[INIT] Last reset reason: %s\n"), buffer);
+        DEBUG_MSG_P(PSTR("[MAIN] Last reset reason: %s\n"), buffer);
     } else {
-        DEBUG_MSG_P(PSTR("[INIT] Last reset reason: %s\n"), (char *) ESP.getResetReason().c_str());
+        DEBUG_MSG_P(PSTR("[MAIN] Last reset reason: %s\n"), (char *) ESP.getResetReason().c_str());
+        DEBUG_MSG_P(PSTR("[MAIN] Last reset info: %s\n"), (char *) ESP.getResetInfo().c_str());
+    }
+    DEBUG_MSG_P(PSTR("\n"));
+
+    // -------------------------------------------------------------------------
+
+    DEBUG_MSG_P(PSTR("[MAIN] Board: %s\n"), getBoardName().c_str());
+    DEBUG_MSG_P(PSTR("[MAIN] Support: %s\n"), getEspurnaModules().c_str());
+    #if SENSOR_SUPPORT
+        DEBUG_MSG_P(PSTR("[MAIN] Sensors: %s\n"), getEspurnaSensors().c_str());
+    #endif // SENSOR_SUPPORT
+    DEBUG_MSG_P(PSTR("[MAIN] WebUI image: %s\n"), getEspurnaWebUI().c_str());
+    DEBUG_MSG_P(PSTR("\n"));
+
+    // -------------------------------------------------------------------------
+
+    DEBUG_MSG_P(PSTR("[MAIN] Firmware MD5: %s\n"), (char *) ESP.getSketchMD5().c_str());
+    #if ADC_MODE_VALUE == ADC_VCC
+        DEBUG_MSG_P(PSTR("[MAIN] Power: %u mV\n"), ESP.getVcc());
+    #endif
+    if (espurnaLoopDelay()) {
+        DEBUG_MSG_P(PSTR("[MAIN] Power saving delay value: %lu ms\n"), espurnaLoopDelay());
     }
 
-    DEBUG_MSG_P(PSTR("[INIT] Settings size: %u bytes\n"), settingsSize());
-    DEBUG_MSG_P(PSTR("[INIT] Free heap: %u bytes\n"), getFreeHeap());
-    #if ADC_MODE_VALUE == ADC_VCC
-        DEBUG_MSG_P(PSTR("[INIT] Power: %u mV\n"), ESP.getVcc());
-    #endif
+    const WiFiSleepType_t sleep_mode = WiFi.getSleepMode();
+    if (sleep_mode != WIFI_NONE_SLEEP) {
+        DEBUG_MSG_P(PSTR("[MAIN] WiFi Sleep Mode: %s\n"), _info_wifi_sleep_mode(sleep_mode));
+    }
 
-    DEBUG_MSG_P(PSTR("[INIT] Power saving delay value: %lu ms\n"), systemLoopDelay());
+    // -------------------------------------------------------------------------
 
     #if SYSTEM_CHECK_ENABLED
-        if (!systemCheck()) DEBUG_MSG_P(PSTR("\n[INIT] Device is in SAFE MODE\n"));
+        if (!systemCheck()) {
+            DEBUG_MSG_P(PSTR("\n"));
+            DEBUG_MSG_P(PSTR("[MAIN] Device is in SAFE MODE\n"));
+        }
     #endif
 
-    DEBUG_MSG_P(PSTR("\n"));
+    // -------------------------------------------------------------------------
+
+    DEBUG_MSG_P(PSTR("\n\n---8<-------\n\n"));
 
 }
 
@@ -397,30 +562,27 @@ bool sslFingerPrintChar(const char * fingerprint, char * destination) {
 // Reset
 // -----------------------------------------------------------------------------
 
-unsigned char resetReason() {
-    static unsigned char status = 255;
-    if (status == 255) {
-        status = EEPROMr.read(EEPROM_CUSTOM_RESET);
-        if (status > 0) resetReason(0);
-        if (status > CUSTOM_RESET_MAX) status = 0;
-    }
-    return status;
+// Use fixed method for Core 2.3.0, because it erases only 2 out of 4 SDK-reserved sectors
+// Fixed since 2.4.0, see: esp8266/core/esp8266/Esp.cpp: ESP::eraseConfig()
+bool eraseSDKConfig() {
+    #if defined(ARDUINO_ESP8266_RELEASE_2_3_0)
+        const size_t cfgsize = 0x4000;
+        size_t cfgaddr = ESP.getFlashChipSize() - cfgsize;
+
+        for (size_t offset = 0; offset < cfgsize; offset += SPI_FLASH_SEC_SIZE) {
+            if (!ESP.flashEraseSector((cfgaddr + offset) / SPI_FLASH_SEC_SIZE)) {
+                return false;
+            }
+        }
+
+        return true;
+    #else
+        return ESP.eraseConfig();
+    #endif
 }
 
-void resetReason(unsigned char reason) {
-    EEPROMr.write(EEPROM_CUSTOM_RESET, reason);
-    EEPROMr.commit();
-}
-
-void reset(unsigned char reason) {
-    resetReason(reason);
-    ESP.restart();
-}
-
-void deferredReset(unsigned long delay, unsigned char reason) {
-    _defer_reset.once_ms(delay, reset, reason);
-}
-
+// -----------------------------------------------------------------------------
+// Helper functions
 // -----------------------------------------------------------------------------
 
 char * ltrim(char * s) {
@@ -447,16 +609,21 @@ int __get_adc_mode() {
 
 bool isNumber(const char * s) {
     unsigned char len = strlen(s);
+    if (0 == len) return false;
     bool decimal = false;
+    bool digit = false;
     for (unsigned char i=0; i<len; i++) {
-        if (s[i] == '-') {
+        if (('-' == s[i]) || ('+' == s[i])) {
             if (i>0) return false;
         } else if (s[i] == '.') {
+            if (!digit) return false;
             if (decimal) return false;
             decimal = true;
         } else if (!isdigit(s[i])) {
             return false;
+        } else {
+            digit = true;
         }
     }
-    return true;
+    return digit;
 }

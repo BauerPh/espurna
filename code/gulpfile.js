@@ -2,7 +2,7 @@
 
 ESP8266 file system builder
 
-Copyright (C) 2016-2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2016-2019 by Xose Pérez <xose dot perez at gmail dot com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -27,11 +27,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // -----------------------------------------------------------------------------
 
 const gulp = require('gulp');
-const runSequence = require('run-sequence');
 const through = require('through2');
 
 const htmlmin = require('gulp-htmlmin');
-const uglify = require('gulp-uglify');
 const inline = require('gulp-inline');
 const inlineImages = require('gulp-css-base64');
 const favicon = require('gulp-base64-favicon');
@@ -72,8 +70,8 @@ var toHeader = function(name, debug) {
         output += '#define ' + safename + '_len ' + source.contents.length + '\n';
         output += 'const uint8_t ' + safename + '[] PROGMEM = {';
         for (var i=0; i<source.contents.length; i++) {
-            if (i > 0) output += ',';
-            if (0 === (i % 20)) output += '\n';
+            if (i > 0) { output += ','; }
+            if (0 === (i % 20)) { output += '\n'; }
             output += '0x' + ('00' + source.contents[i].toString(16)).slice(-2);
         }
         output += '\n};';
@@ -111,12 +109,14 @@ var htmllintReporter = function(filepath, issues) {
 
 var buildWebUI = function(module) {
 
-    var modules = {'light': false, 'sensor': false, 'rfbridge': false, 'rfm69': false};
+    var modules = {'light': false, 'sensor': false, 'rfbridge': false, 'rfm69': false, 'thermostat': false};
     if ('all' === module) {
         modules['light'] = true;
         modules['sensor'] = true;
-        modules['rfbridge'] = false;   // we will never be adding this except when building RFBRIDGE
+        modules['rfbridge'] = true;
         modules['rfm69'] = false;   // we will never be adding this except when building RFM69GW
+        modules['lightfox'] = false;   // we will never be adding this except when building lightfox
+        modules['thermostat'] = true;
     } else if ('small' !== module) {
         modules[module] = true;
     }
@@ -127,6 +127,7 @@ var buildWebUI = function(module) {
             'rules': {
                 'id-class-style': false,
                 'label-req-for': false,
+                'line-end-style': false,
             }
         }, htmllintReporter)).
         pipe(favicon()).
@@ -188,19 +189,29 @@ gulp.task('webui_rfm69', function() {
     return buildWebUI('rfm69');
 });
 
+gulp.task('webui_lightfox', function() {
+    return buildWebUI('lightfox');
+});
+
+gulp.task('webui_thermostat', function() {
+    return buildWebUI('thermostat');
+});
+
 gulp.task('webui_all', function() {
     return buildWebUI('all');
 });
 
-gulp.task('webui', function(cb) {
-    runSequence([
+gulp.task('webui',
+    gulp.parallel(
         'webui_small',
         'webui_sensor',
         'webui_light',
         'webui_rfbridge',
         'webui_rfm69',
+        'webui_lightfox',
+        'webui_thermostat',
         'webui_all'
-    ], cb);
-});
+    )
+);
 
-gulp.task('default', ['webui']);
+gulp.task('default', gulp.series('webui'));

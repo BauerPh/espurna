@@ -19,15 +19,16 @@ import argparse
 import os
 import re
 import shlex
+import subprocess
 import sys
 from collections import OrderedDict
-from sortedcontainers import SortedDict
-import subprocess
 
-if (sys.version_info > (3, 0)):
-    from subprocess import getstatusoutput as getstatusoutput
+from sortedcontainers import SortedDict
+
+if sys.version_info > (3, 0):
+    from subprocess import getstatusoutput
 else:
-    from commands import getstatusoutput as getstatusoutput
+    from commands import getstatusoutput
 
 # -------------------------------------------------------------------------------
 
@@ -55,7 +56,7 @@ def file_size(file):
 
 
 def analyse_memory(elf_file):
-    command = "%s -t '%s' " % (objdump_binary, elf_file)
+    command = "{} -t '{}'".format(objdump_binary, elf_file)
     response = subprocess.check_output(shlex.split(command))
     if isinstance(response, bytes):
         response = response.decode('utf-8')
@@ -66,8 +67,8 @@ def analyse_memory(elf_file):
     ret = {}
 
     for (id_, _) in list(sections.items()):
-        section_start_token = " _%s_start" % id_
-        section_end_token = " _%s_end" % id_
+        section_start_token = " _{}_start".format(id_)
+        section_end_token = " _{}_end".format(id_)
         section_start = -1
         section_end = -1
         for line in lines:
@@ -92,18 +93,24 @@ def analyse_memory(elf_file):
         # print("{0: >10}|{1: >30}|{2:12X}|{3:12X}|{4:8}".format(id_, descr, section_start, section_end, section_length))
         # i += 1
 
-    # print("Total Used RAM : %d" % usedRAM)
-    # print("Free RAM : %d" % (TOTAL_DRAM - usedRAM))
-    # print("Free IRam : %d" % usedIRAM)
+    # print("Total Used RAM : {:d}".format(usedRAM))
+    # print("Free RAM : {:d}".format(TOTAL_DRAM - usedRAM))
+    # print("Free IRam : {:d}".format(usedIRAM))
     return ret
 
 
 def run(env_, modules_):
     flags = ""
-    for item in modules_.items():
-        flags += "-D%s_SUPPORT=%d " % item
-    command = "export ESPURNA_BOARD=\"WEMOS_D1_MINI_RELAYSHIELD\"; export ESPURNA_FLAGS=\"%s\"; platformio run --silent --environment %s" % (flags, env_)
+    for k, v in modules_.items():
+        flags += "-D{}_SUPPORT={:d} ".format(k, v)
+    command = "ESPURNA_BOARD=\"WEMOS_D1_MINI_RELAYSHIELD\" ESPURNA_FLAGS=\"{}\" platformio run --silent --environment {} 2>/dev/null".format(flags, env_)
     subprocess.check_call(command, shell=True)
+
+
+def calc_free(module):
+    free = 80 * 1024 - module['data'] - module['rodata'] - module['bss']
+    free = free + (16 - free % 16)
+    module['free'] = free
 
 
 def modules_get():
@@ -116,7 +123,8 @@ def modules_get():
     del modules_['NETBIOS']
     return modules_
 
-try:
+
+if __name__ == '__main__':
 
     # Parse command line options
     parser = argparse.ArgumentParser(description=description)
@@ -156,7 +164,7 @@ try:
     # Check test modules exist
     for module in test_modules:
         if module not in available_modules:
-            print("Module %s not found" % module)
+            print("Module {} not found".format(module))
             sys.exit(2)
 
     # Define base configuration
@@ -169,31 +177,54 @@ try:
 
     # Show init message
     if len(test_modules) > 0:
-        print("Analyzing module(s) %s on top of %s configuration\n" % (", ".join(test_modules), "CORE" if args.core > 0 else "DEFAULT"))
+        print("Analyzing module(s) {} on top of {} configuration\n".format(", ".join(test_modules), "CORE" if args.core > 0 else "DEFAULT"))
     else:
-        print("Analyzing %s configuration\n" % ("CORE" if args.core > 0 else "DEFAULT"))
+        print("Analyzing {} configuration\n".format("CORE" if args.core > 0 else "DEFAULT"))
 
-    output_format = "{:<20}|{:<11}|{:<11}|{:<11}|{:<11}|{:<11}|{:<12}"
+    output_format = "{:<20}|{:<15}|{:<15}|{:<15}|{:<15}|{:<15}|{:<15}|{:<15}"
     print(output_format.format(
             "Module",
             "Cache IRAM",
             "Init RAM",
             "R.O. RAM",
             "Uninit RAM",
+            "Available RAM",
             "Flash ROM",
             "Binary size"
+    ))
+    print(output_format.replace("<", ">").format(
+            "",
+            ".text",
+            ".data",
+            ".rodata",
+            ".bss",
+            "heap + stack",
+            ".irom0.text",
+            ""
+    ))
+    print(output_format.format(
+            "-" * 20,
+            "-" * 15,
+            "-" * 15,
+            "-" * 15,
+            "-" * 15,
+            "-" * 15,
+            "-" * 15,
+            "-" * 15
     ))
 
     # Build the core without modules to get base memory usage
     run(env, modules)
-    base = analyse_memory(".pioenvs/%s/firmware.elf" % env)
-    base['size'] = file_size(".pioenvs/%s/firmware.bin" % env)
+    base = analyse_memory(".pioenvs/{}/firmware.elf".format(env))
+    base['size'] = file_size(".pioenvs/{}/firmware.bin".format(env))
+    calc_free(base)
     print(output_format.format(
             "CORE" if args.core == 1 else "DEFAULT",
             base['text'],
             base['data'],
             base['rodata'],
             base['bss'],
+            base['free'],
             base['irom0_text'],
             base['size'],
     ))
@@ -204,8 +235,9 @@ try:
 
         modules[module] = 1
         run(env, modules)
-        results[module] = analyse_memory(".pioenvs/%s/firmware.elf" % env)
-        results[module]['size'] = file_size(".pioenvs/%s/firmware.bin" % env)
+        results[module] = analyse_memory(".pioenvs/{}/firmware.elf".format(env))
+        results[module]['size'] = file_size(".pioenvs/{}/firmware.bin".format(env))
+        calc_free(results[module])
         modules[module] = 0
 
         print(output_format.format(
@@ -214,6 +246,7 @@ try:
                 results[module]['data'] - base['data'],
                 results[module]['rodata'] - base['rodata'],
                 results[module]['bss'] - base['bss'],
+                results[module]['free'] - base['free'],
                 results[module]['irom0_text'] - base['irom0_text'],
                 results[module]['size'] - base['size'],
         ))
@@ -224,9 +257,21 @@ try:
         for module in test_modules:
             modules[module] = 1
         run(env, modules)
-        total = analyse_memory(".pioenvs/%s/firmware.elf" % env)
-        total['size'] = file_size(".pioenvs/%s/firmware.bin" % env)
+        total = analyse_memory(".pioenvs/{}/firmware.elf".format(env))
+        total['size'] = file_size(".pioenvs/{}/firmware.bin".format(env))
+        calc_free(total)
 
+        print(output_format.format(
+                "-" * 20,
+                "-" * 15,
+                "-" * 15,
+                "-" * 15,
+                "-" * 15,
+                "-" * 15,
+                "-" * 15,
+                "-" * 15
+        ))
+        
         if len(test_modules) > 1:
             print(output_format.format(
                     "ALL MODULES",
@@ -234,6 +279,7 @@ try:
                     total['data'] - base['data'],
                     total['rodata'] - base['rodata'],
                     total['bss'] - base['bss'],
+                    total['free'] - base['free'],
                     total['irom0_text'] - base['irom0_text'],
                     total['size'] - base['size'],
             ))
@@ -244,13 +290,10 @@ try:
                 total['data'],
                 total['rodata'],
                 total['bss'],
+                total['free'],
                 total['irom0_text'],
                 total['size'],
         ))
 
-except:
-    raise
-
-subprocess.check_call("export ESPURNA_BOARD=\"\"; export ESPURNA_FLAGS=\"\"", shell=True)
 
 print("\n")

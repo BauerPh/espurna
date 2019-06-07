@@ -2,7 +2,7 @@
 
 WEBSERVER MODULE
 
-Copyright (C) 2016-2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2016-2019 by Xose Pérez <xose dot perez at gmail dot com>
 
 */
 
@@ -27,6 +27,10 @@ Copyright (C) 2016-2018 by Xose Pérez <xose dot perez at gmail dot com>
     #include "static/index.rfbridge.html.gz.h"
 #elif WEBUI_IMAGE == WEBUI_IMAGE_RFM69
     #include "static/index.rfm69.html.gz.h"
+#elif WEBUI_IMAGE == WEBUI_IMAGE_LIGHTFOX
+    #include "static/index.lightfox.html.gz.h"
+#elif WEBUI_IMAGE == WEBUI_IMAGE_THERMOSTAT
+    #include "static/index.thermostat.html.gz.h"
 #elif WEBUI_IMAGE == WEBUI_IMAGE_FULL
     #include "static/index.all.html.gz.h"
 #endif
@@ -44,6 +48,9 @@ AsyncWebServer * _server;
 char _last_modified[50];
 std::vector<uint8_t> * _webConfigBuffer;
 bool _webConfigSuccess = false;
+
+std::vector<web_request_callback_f> _web_request_callbacks;
+std::vector<web_body_callback_f> _web_body_callbacks;
 
 // -----------------------------------------------------------------------------
 // HOOKS
@@ -91,7 +98,9 @@ void _onGetConfig(AsyncWebServerRequest *request) {
     response->printf("{\n\"app\": \"%s\"", APP_NAME);
     response->printf(",\n\"version\": \"%s\"", APP_VERSION);
     response->printf(",\n\"backup\": \"1\"");
-    response->printf(",\n\"timestamp\": \"%s\"", ntpDateTime().c_str());
+    #if NTP_SUPPORT
+        response->printf(",\n\"timestamp\": \"%s\"", ntpDateTime().c_str());
+    #endif
 
     // Write the keys line by line (not sorted)
     unsigned long count = settingsKeyCount();
@@ -322,15 +331,40 @@ void _onUpgradeData(AsyncWebServerRequest *request, String filename, size_t inde
             #endif
         }
     } else {
-        DEBUG_MSG_P(PSTR("[UPGRADE] Progress: %u bytes\r"), index + len);
+        //Removed to avoid websocket ping back during upgrade (see #1574)
+        //DEBUG_MSG_P(PSTR("[UPGRADE] Progress: %u bytes\r"), index + len);
     }
 }
+
+void _onRequest(AsyncWebServerRequest *request){
+
+    // Send request to subscribers
+    for (unsigned char i = 0; i < _web_request_callbacks.size(); i++) {
+        bool response = (_web_request_callbacks[i])(request);
+        if (response) return;
+    }
+
+    // No subscriber handled the request, return a 404
+    request->send(404);
+
+}
+
+void _onBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+
+    // Send request to subscribers
+    for (unsigned char i = 0; i < _web_body_callbacks.size(); i++) {
+        bool response = (_web_body_callbacks[i])(request, data, len, index, total);
+        if (response) return;
+    }
+
+}
+
 
 // -----------------------------------------------------------------------------
 
 bool webAuthenticate(AsyncWebServerRequest *request) {
     #if USE_PASSWORD
-        String password = getSetting("adminPass", ADMIN_PASS);
+        String password = getAdminPass();
         char httpPassword[password.length() + 1];
         password.toCharArray(httpPassword, password.length() + 1);
         return request->authenticate(WEB_USERNAME, httpPassword);
@@ -343,6 +377,14 @@ bool webAuthenticate(AsyncWebServerRequest *request) {
 
 AsyncWebServer * webServer() {
     return _server;
+}
+
+void webBodyRegister(web_body_callback_f callback) {
+    _web_body_callbacks.push_back(callback);
+}
+
+void webRequestRegister(web_request_callback_f callback) {
+    _web_request_callbacks.push_back(callback);
 }
 
 unsigned int webPort() {
@@ -373,6 +415,8 @@ void webSetup() {
     #if WEB_EMBEDDED
         _server->on("/index.html", HTTP_GET, _onHome);
     #endif
+
+    // Other entry points
     _server->on("/reset", HTTP_GET, _onReset);
     _server->on("/config", HTTP_GET, _onGetConfig);
     _server->on("/config", HTTP_POST | HTTP_PUT, _onPostConfig, _onPostConfigData);
@@ -389,10 +433,10 @@ void webSetup() {
             });
     #endif
 
-    // 404
-    _server->onNotFound([](AsyncWebServerRequest *request){
-        request->send(404);
-    });
+
+    // Handle other requests, including 404
+    _server->onRequestBody(_onBody);
+    _server->onNotFound(_onRequest);
 
     // Run server
     #if ASYNC_TCP_SSL_ENABLED & WEB_SSL_ENABLED
@@ -401,6 +445,7 @@ void webSetup() {
     #else
         _server->begin();
     #endif
+
     DEBUG_MSG_P(PSTR("[WEBSERVER] Webserver running on port %u\n"), port);
 
 }

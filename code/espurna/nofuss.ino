@@ -2,7 +2,7 @@
 
 NOFUSS MODULE
 
-Copyright (C) 2016-2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2016-2019 by Xose Pérez <xose dot perez at gmail dot com>
 
 */
 
@@ -54,16 +54,15 @@ void _nofussConfigure() {
 
     } else {
 
-        char buffer[20];
-        snprintf_P(buffer, sizeof(buffer), PSTR("%s-%s"), APP_NAME, DEVICE);
-
         NoFUSSClient.setServer(nofussServer);
-        NoFUSSClient.setDevice(buffer);
+        NoFUSSClient.setDevice(APP_NAME "_" DEVICE);
         NoFUSSClient.setVersion(APP_VERSION);
+        NoFUSSClient.setBuild(String(__UNIX_TIMESTAMP__));
 
         DEBUG_MSG_P(PSTR("[NOFUSS] Server : %s\n"), nofussServer.c_str());
-        DEBUG_MSG_P(PSTR("[NOFUSS] Dervice: %s\n"), buffer);
+        DEBUG_MSG_P(PSTR("[NOFUSS] Dervice: %s\n"), APP_NAME "_" DEVICE);
         DEBUG_MSG_P(PSTR("[NOFUSS] Version: %s\n"), APP_VERSION);
+        DEBUG_MSG_P(PSTR("[NOFUSS] Build: %s\n"), String(__UNIX_TIMESTAMP__).c_str());
         DEBUG_MSG_P(PSTR("[NOFUSS] Enabled\n"));
 
     }
@@ -74,8 +73,8 @@ void _nofussConfigure() {
 
 void _nofussInitCommands() {
 
-    settingsRegisterCommand(F("NOFUSS"), [](Embedis* e) {
-        DEBUG_MSG_P(PSTR("+OK\n"));
+    terminalRegisterCommand(F("NOFUSS"), [](Embedis* e) {
+        terminalOK();
         nofussRun();
     });
 
@@ -120,6 +119,9 @@ void nofussSetup() {
             #if WEB_SUPPORT
                 wsSend_P(PSTR("{\"message\": 1}"));
             #endif
+
+            // Disabling EEPROM rotation to prevent writing to EEPROM after the upgrade
+            eepromRotate(false);
         }
 
         if (code == NOFUSS_FILESYSTEM_UPDATE_ERROR) {
@@ -147,14 +149,14 @@ void nofussSetup() {
         }
 
         if (code == NOFUSS_END) {
-    	    DEBUG_MSG_P(PSTR("[NoFUSS] End\n"));
+            DEBUG_MSG_P(PSTR("[NoFUSS] End\n"));
+            eepromRotate(true);
         }
 
     });
 
     #if WEB_SUPPORT
         wsOnSendRegister(_nofussWebSocketOnSend);
-        wsOnAfterParseRegister(_nofussConfigure);
         wsOnReceiveRegister(_nofussWebSocketOnReceive);
     #endif
 
@@ -162,8 +164,9 @@ void nofussSetup() {
         _nofussInitCommands();
     #endif
 
-    // Register loop
+    // Main callbacks
     espurnaRegisterLoop(nofussLoop);
+    espurnaRegisterReload(_nofussConfigure);
 
 }
 

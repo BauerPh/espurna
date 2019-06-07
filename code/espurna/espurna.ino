@@ -2,7 +2,7 @@
 
 ESPurna
 
-Copyright (C) 2016-2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2016-2019 by Xose Pérez <xose dot perez at gmail dot com>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -23,13 +23,35 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <vector>
 
 std::vector<void (*)()> _loop_callbacks;
+std::vector<void (*)()> _reload_callbacks;
+
+bool _reload_config = false;
+unsigned long _loop_delay = 0;
 
 // -----------------------------------------------------------------------------
-// REGISTER
+// GENERAL CALLBACKS
 // -----------------------------------------------------------------------------
 
 void espurnaRegisterLoop(void (*callback)()) {
     _loop_callbacks.push_back(callback);
+}
+
+void espurnaRegisterReload(void (*callback)()) {
+    _reload_callbacks.push_back(callback);
+}
+
+void espurnaReload() {
+    _reload_config = true;
+}
+
+void _espurnaReload() {
+    for (unsigned char i = 0; i < _reload_callbacks.size(); i++) {
+        (_reload_callbacks[i])();
+    }
+}
+
+unsigned long espurnaLoopDelay() {
+    return _loop_delay;
 }
 
 // -----------------------------------------------------------------------------
@@ -42,19 +64,30 @@ void setup() {
     // Basic modules, will always run
     // -------------------------------------------------------------------------
 
+    // Cache initial free heap value
+    getInitialFreeHeap();
+
     // Serial debug
     #if DEBUG_SUPPORT
         debugSetup();
     #endif
 
+    // Init RTCMEM
+    rtcmemSetup();
+
     // Init EEPROM
     eepromSetup();
+
+    // Init persistance
+    settingsSetup();
 
     // Init Serial, SPIFFS and system check
     systemSetup();
 
-    // Init persistance and terminal features
-    settingsSetup();
+    // Init terminal features
+    #if TERMINAL_SUPPORT
+        terminalSetup();
+    #endif
 
     // Hostname & board name initialization
     if (getSetting("hostname").length() == 0) {
@@ -87,24 +120,29 @@ void setup() {
     #if WEB_SUPPORT
         webSetup();
         wsSetup();
-        apiSetup();
         #if DEBUG_WEB_SUPPORT
             debugWebSetup();
         #endif
+    #endif
+    #if API_SUPPORT
+        apiSetup();
     #endif
 
     // lightSetup must be called before relaySetup
     #if LIGHT_PROVIDER != LIGHT_PROVIDER_NONE
         lightSetup();
     #endif
-
     relaySetup();
     #if BUTTON_SUPPORT
         buttonSetup();
     #endif
+    #if ENCODER_SUPPORT && (LIGHT_PROVIDER != LIGHT_PROVIDER_NONE)
+        encoderSetup();
+    #endif
     #if LED_SUPPORT
         ledSetup();
     #endif
+
     #if MQTT_SUPPORT
         mqttSetup();
     #endif
@@ -129,7 +167,7 @@ void setup() {
     #if I2C_SUPPORT
         i2cSetup();
     #endif
-    #ifdef ITEAD_SONOFF_RFBRIDGE
+    #if RF_SUPPORT
         rfbSetup();
     #endif
     #if ALEXA_SUPPORT
@@ -146,9 +184,6 @@ void setup() {
     #endif
     #if RFM69_SUPPORT
         rfm69Setup();
-    #endif
-    #if RF_SUPPORT
-        rfSetup();
     #endif
     #if IR_SUPPORT
         irSetup();
@@ -168,6 +203,15 @@ void setup() {
     #if UART_MQTT_SUPPORT
         uartmqttSetup();
     #endif
+    #ifdef FOXEL_LIGHTFOX_DUAL
+        lightfoxSetup();
+    #endif
+    #if THERMOSTAT_SUPPORT
+        thermostatSetup();
+    #endif
+    #if THERMOSTAT_DISPLAY_SUPPORT
+        displaySetup();
+    #endif
 
 
     // 3rd party code hook
@@ -178,15 +222,29 @@ void setup() {
     // Prepare configuration for version 2.0
     migrate();
 
+    // Set up delay() after loop callbacks are finished
+    // Note: should be after settingsSetup()
+    _loop_delay = atol(getSetting("loopDelay", LOOP_DELAY_TIME).c_str());
+    _loop_delay = constrain(_loop_delay, 0, 300);
+
     saveSettings();
 
 }
 
 void loop() {
 
+    // Reload config before running any callbacks
+    if (_reload_config) {
+        _espurnaReload();
+        _reload_config = false;
+    }
+
     // Call registered loop callbacks
     for (unsigned char i = 0; i < _loop_callbacks.size(); i++) {
         (_loop_callbacks[i])();
     }
+
+    // Power saving delay
+    if (_loop_delay) delay(_loop_delay);
 
 }

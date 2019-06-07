@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------------
 // Abstract Energy Monitor Sensor (other EMON sensors extend this class)
-// Copyright (C) 2017-2018 by Xose Pérez <xose dot perez at gmail dot com>
+// Copyright (C) 2017-2019 by Xose Pérez <xose dot perez at gmail dot com>
 // -----------------------------------------------------------------------------
 
 #if SENSOR_SUPPORT
@@ -53,6 +53,11 @@ class EmonSensor : public I2CSensor {
             for (unsigned char i=0; i<_channels; i++) {
                 _energy[i] = 0;
             }
+        }
+
+        void resetEnergy(unsigned char channel, double value = 0) {
+            if (channel >= _channels) return;
+            _energy[channel] = value;
         }
 
         // ---------------------------------------------------------------------
@@ -146,7 +151,7 @@ class EmonSensor : public I2CSensor {
             #endif
         }
 
-        virtual unsigned int readADC(unsigned char channel) {}
+        virtual unsigned int readADC(unsigned char channel) = 0;
 
         void calculateFactors(unsigned char channel) {
 
@@ -154,8 +159,8 @@ class EmonSensor : public I2CSensor {
 
             unsigned int s = 1;
             unsigned int i = 1;
-            unsigned int m = s * i;
-            unsigned int multiplier;
+            unsigned int m = 1;
+            unsigned int multiplier = 1;
             while (m * _current_factor[channel] < 1) {
                 multiplier = m;
                 i = (i == 1) ? 2 : (i == 2) ? 5 : 1;

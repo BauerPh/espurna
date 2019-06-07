@@ -31,8 +31,14 @@ PROGMEM const char espurna_modules[] =
     #if ALEXA_SUPPORT
         "ALEXA "
     #endif
+    #if API_SUPPORT
+        "API "
+    #endif
     #if BROKER_SUPPORT
         "BROKER "
+    #endif
+    #if BUTTON_SUPPORT
+        "BUTTON "
     #endif
     #if DEBUG_SERIAL_SUPPORT
         "DEBUG_SERIAL "
@@ -49,6 +55,9 @@ PROGMEM const char espurna_modules[] =
     #if DOMOTICZ_SUPPORT
         "DOMOTICZ "
     #endif
+    #if ENCODER_SUPPORT
+        "ENCODER "
+    #endif
     #if HOMEASSISTANT_SUPPORT
         "HOMEASSISTANT "
     #endif
@@ -58,14 +67,20 @@ PROGMEM const char espurna_modules[] =
     #if INFLUXDB_SUPPORT
         "INFLUXDB "
     #endif
+    #if IR_SUPPORT
+        "IR "
+    #endif
+    #if LED_SUPPORT
+        "LED "
+    #endif
     #if LLMNR_SUPPORT
         "LLMNR "
     #endif
-    #if MDNS_SERVER_SUPPORT
-        "MDNS_SERVER "
-    #endif
     #if MDNS_CLIENT_SUPPORT
         "MDNS_CLIENT "
+    #endif
+    #if MDNS_SERVER_SUPPORT
+        "MDNS_SERVER "
     #endif
     #if MQTT_SUPPORT
         "MQTT "
@@ -79,11 +94,11 @@ PROGMEM const char espurna_modules[] =
     #if NTP_SUPPORT
         "NTP "
     #endif
-    #if RF_SUPPORT
-        "RF "
-    #endif
     #if RFM69_SUPPORT
         "RFM69 "
+    #endif
+    #if RF_SUPPORT
+        "RF "
     #endif
     #if SCHEDULER_SUPPORT
         "SCHEDULER "
@@ -102,6 +117,12 @@ PROGMEM const char espurna_modules[] =
     #endif
     #if TERMINAL_SUPPORT
         "TERMINAL "
+    #endif
+    #if THERMOSTAT_SUPPORT
+        "THERMOSTAT "
+    #endif
+    #if THERMOSTAT_DISPLAY_SUPPORT
+        "THERMOSTAT_DISPLAY "
     #endif
     #if THINGSPEAK_SUPPORT
         "THINGSPEAK "
@@ -129,6 +150,9 @@ PROGMEM const char espurna_sensors[] =
     #endif
     #if BH1750_SUPPORT
         "BH1750 "
+    #endif
+    #if BMP180_SUPPORT
+        "BMP180 "
     #endif
     #if BMX280_SUPPORT
         "BMX280 "
@@ -166,14 +190,20 @@ PROGMEM const char espurna_sensors[] =
     #if GUVAS12SD_SUPPORT
         "GUVAS12SD "
     #endif
-    #if HCSR04_SUPPORT
-        "HCSR04 "
-    #endif
     #if HLW8012_SUPPORT
         "HLW8012 "
     #endif
+    #if LDR_SUPPORT
+        "LDR "
+    #endif
     #if MHZ19_SUPPORT
         "MHZ19 "
+    #endif
+    #if MICS2710_SUPPORT
+        "MICS2710 "
+    #endif
+    #if MICS5525_SUPPORT
+        "MICS5525 "
     #endif
     #if NTC_SUPPORT
         "NTC "
@@ -181,8 +211,14 @@ PROGMEM const char espurna_sensors[] =
     #if PMSX003_SUPPORT
         "PMSX003 "
     #endif
+    #if PULSEMETER_SUPPORT
+        "PULSEMETER "
+    #endif
     #if PZEM004T_SUPPORT
         "PZEM004T "
+    #endif
+    #if SDS011_SUPPORT
+        "SDS011 "
     #endif
     #if SENSEAIR_SUPPORT
         "SENSEAIR "
@@ -193,11 +229,23 @@ PROGMEM const char espurna_sensors[] =
     #if SI7021_SUPPORT
         "SI7021 "
     #endif
+    #if SONAR_SUPPORT
+        "SONAR "
+    #endif
     #if TMP3X_SUPPORT
         "TMP3X "
     #endif
     #if V9261F_SUPPORT
         "V9261F "
+    #endif
+    #if VEML6075_SUPPORT
+        "VEML6075 "
+    #endif
+    #if VL53L1X_SUPPORT
+        "VL53L1X "
+    #endif
+    #if EZOPH_SUPPORT
+        "EZOPH "
     #endif
     "";
 
@@ -208,9 +256,12 @@ PROGMEM const unsigned char magnitude_decimals[] = {
     3, 0, 0, 0, 0, 0, 0, 0, // Power decimals
     0, 0, 0, // analog, digital, event
     0, 0, 0, // PM
-    0, 0, 3, 3, 0,
+    0, 0,
+    0, 0, 3, // UVA, UVB, UVI
+    3, 0,
     4, 4, // Geiger Counter decimals
-    0
+    0,
+    0, 0, 0, 3    // NO2, CO, Ohms, pH
 };
 
 PROGMEM const char magnitude_unknown_topic[] = "unknown";
@@ -233,12 +284,18 @@ PROGMEM const char magnitude_pm2dot5_topic[] = "pm2dot5";
 PROGMEM const char magnitude_pm10_topic[] = "pm10";
 PROGMEM const char magnitude_co2_topic[] = "co2";
 PROGMEM const char magnitude_lux_topic[] = "lux";
-PROGMEM const char magnitude_uv_topic[] = "uv";
+PROGMEM const char magnitude_uva_topic[] = "uva";
+PROGMEM const char magnitude_uvb_topic[] = "uvb";
+PROGMEM const char magnitude_uvi_topic[] = "uvi";
 PROGMEM const char magnitude_distance_topic[] = "distance";
 PROGMEM const char magnitude_hcho_topic[] = "hcho";
 PROGMEM const char magnitude_geiger_cpm_topic[] = "ldr_cpm";  // local dose rate [Counts per minute]
 PROGMEM const char magnitude_geiger_sv_topic[] = "ldr_uSvh";  // local dose rate [µSievert per hour]
 PROGMEM const char magnitude_count_topic[] = "count";
+PROGMEM const char magnitude_no2_topic[] = "no2";
+PROGMEM const char magnitude_co_topic[] = "co";
+PROGMEM const char magnitude_resistance_topic[] = "resistance";
+PROGMEM const char magnitude_ph_topic[] = "ph";
 
 PROGMEM const char* const magnitude_topics[] = {
     magnitude_unknown_topic, magnitude_temperature_topic, magnitude_humidity_topic,
@@ -247,10 +304,12 @@ PROGMEM const char* const magnitude_topics[] = {
     magnitude_power_factor_topic, magnitude_energy_topic, magnitude_energy_delta_topic,
     magnitude_analog_topic, magnitude_digital_topic, magnitude_event_topic,
     magnitude_pm1dot0_topic, magnitude_pm2dot5_topic, magnitude_pm10_topic,
-    magnitude_co2_topic, magnitude_lux_topic, magnitude_uv_topic,
+    magnitude_co2_topic, magnitude_lux_topic,
+    magnitude_uva_topic, magnitude_uvb_topic, magnitude_uvi_topic,
     magnitude_distance_topic, magnitude_hcho_topic,
     magnitude_geiger_cpm_topic, magnitude_geiger_sv_topic,
-    magnitude_count_topic
+    magnitude_count_topic,
+    magnitude_no2_topic, magnitude_co_topic, magnitude_resistance_topic, magnitude_ph_topic
 };
 
 PROGMEM const char magnitude_empty[] = "";
@@ -267,11 +326,11 @@ PROGMEM const char magnitude_kwh[] = "kWh";
 PROGMEM const char magnitude_ugm3[] = "µg/m³";
 PROGMEM const char magnitude_ppm[] = "ppm";
 PROGMEM const char magnitude_lux[] = "lux";
-PROGMEM const char magnitude_uv[] = "uv";
 PROGMEM const char magnitude_distance[] = "m";
 PROGMEM const char magnitude_mgm3[] = "mg/m³";
 PROGMEM const char magnitude_geiger_cpm[] = "cpm";    // Counts per Minute: Unit of local dose rate (Geiger counting)
 PROGMEM const char magnitude_geiger_sv[] = "µSv/h";   // µSievert per hour: 2nd unit of local dose rate (Geiger counting)
+PROGMEM const char magnitude_resistance[] = "ohm";
 
 
 PROGMEM const char* const magnitude_units[] = {
@@ -281,10 +340,14 @@ PROGMEM const char* const magnitude_units[] = {
     magnitude_percentage, magnitude_joules, magnitude_joules,
     magnitude_empty, magnitude_empty, magnitude_empty,
     magnitude_ugm3, magnitude_ugm3, magnitude_ugm3,
-    magnitude_ppm, magnitude_lux, magnitude_uv,
+    magnitude_ppm, magnitude_lux,
+    magnitude_empty, magnitude_empty, magnitude_empty,
     magnitude_distance, magnitude_mgm3,
-    magnitude_geiger_cpm, magnitude_geiger_sv,       // Geiger counter units
-    magnitude_empty
+    magnitude_geiger_cpm, magnitude_geiger_sv,                  // Geiger counter units
+    magnitude_empty,                                            //
+    magnitude_ppm, magnitude_ppm,                               // NO2 & CO2
+    magnitude_resistance,
+    magnitude_empty                                             // pH
 };
 
 #endif

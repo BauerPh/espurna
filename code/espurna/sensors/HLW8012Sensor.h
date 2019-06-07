@@ -1,6 +1,6 @@
 // -----------------------------------------------------------------------------
 // Event Counter Sensor
-// Copyright (C) 2017-2018 by Xose Pérez <xose dot perez at gmail dot com>
+// Copyright (C) 2017-2019 by Xose Pérez <xose dot perez at gmail dot com>
 // -----------------------------------------------------------------------------
 
 #if SENSOR_SUPPORT && HLW8012_SUPPORT
@@ -9,8 +9,6 @@
 
 #include "Arduino.h"
 #include "BaseSensor.h"
-
-#include <ESP8266WiFi.h>
 #include <HLW8012.h>
 
 class HLW8012Sensor : public BaseSensor {
@@ -48,7 +46,8 @@ class HLW8012Sensor : public BaseSensor {
             _hlw8012->resetMultipliers();
         }
 
-        void resetEnergy() {
+        void resetEnergy(double value = 0) {
+            _energy_offset = value;
             _hlw8012->resetEnergy();
         }
 
@@ -147,14 +146,10 @@ class HLW8012Sensor : public BaseSensor {
 
             // Handle interrupts
             #if HLW8012_USE_INTERRUPTS
-                _enableInterrupts(true);
-            #else
-                _onconnect_handler = WiFi.onStationModeGotIP([this](WiFiEventStationModeGotIP ipInfo) {
-                    _enableInterrupts(true);
-                });
-                _ondisconnect_handler = WiFi.onStationModeDisconnected([this](WiFiEventStationModeDisconnected ipInfo) {
+                #if HLW8012_WAIT_FOR_WIFI == 0
                     _enableInterrupts(false);
-                });
+                    _enableInterrupts(true);
+                #endif
             #endif
 
             _ready = true;
@@ -200,9 +195,18 @@ class HLW8012Sensor : public BaseSensor {
             if (index == 3) return _hlw8012->getReactivePower();
             if (index == 4) return _hlw8012->getApparentPower();
             if (index == 5) return 100 * _hlw8012->getPowerFactor();
-            if (index == 6) return _hlw8012->getEnergy();
+            if (index == 6) return (_energy_offset + _hlw8012->getEnergy());
             return 0;
         }
+
+        // Pre-read hook (usually to populate registers with up-to-date data)
+        #if HLW8012_USE_INTERRUPTS
+        #if HLW8012_WAIT_FOR_WIFI
+        void pre() {
+            _enableInterrupts(wifiConnected());
+        }
+        #endif
+        #endif
 
         // Toggle between current and voltage monitoring
         #if HLW8012_USE_INTERRUPTS == 0
@@ -246,10 +250,15 @@ class HLW8012Sensor : public BaseSensor {
 
             } else {
 
-                _detach(_cf);
-                _detach(_cf1);
-                _interrupt_cf = GPIO_NONE;
-                _interrupt_cf1 = GPIO_NONE;
+                if (GPIO_NONE != _interrupt_cf) {
+                    _detach(_interrupt_cf);
+                    _interrupt_cf = GPIO_NONE;
+                }
+
+                if (GPIO_NONE != _interrupt_cf1) {
+                    _detach(_interrupt_cf1);
+                    _interrupt_cf1 = GPIO_NONE;
+                }
 
             }
 
@@ -261,13 +270,9 @@ class HLW8012Sensor : public BaseSensor {
         unsigned char _cf = GPIO_NONE;
         unsigned char _cf1 = GPIO_NONE;
         bool _sel_current = true;
+        double _energy_offset = 0;
 
         HLW8012 * _hlw8012 = NULL;
-
-        #if HLW8012_USE_INTERRUPTS == 0
-            WiFiEventHandler _onconnect_handler;
-            WiFiEventHandler _ondisconnect_handler;
-        #endif
 
 };
 

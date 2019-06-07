@@ -2,7 +2,7 @@
 
 SSDP MODULE
 
-Copyright (C) 2017-2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2017-2019 by Xose Pérez <xose dot perez at gmail dot com>
 Uses SSDP library by PawelDino (https://github.com/PawelDino)
 https://github.com/esp8266/Arduino/issues/2283#issuecomment-299635604
 
@@ -46,7 +46,7 @@ void ssdpSetup() {
 
         char response[strlen_P(_ssdp_template) + 100];
         snprintf_P(response, sizeof(response), _ssdp_template,
-            WiFi.localIP().toString().c_str(),  // ip
+            ip.toString().c_str(),              // ip
             webPort(),                          // port
             SSDP_DEVICE_TYPE,                   // device type
             getSetting("hostname").c_str(),     // friendlyName

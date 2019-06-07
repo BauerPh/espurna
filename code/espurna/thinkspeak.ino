@@ -2,7 +2,7 @@
 
 THINGSPEAK MODULE
 
-Copyright (C) 2018 by Xose Pérez <xose dot perez at gmail dot com>
+Copyright (C) 2019 by Xose Pérez <xose dot perez at gmail dot com>
 
 */
 
@@ -25,12 +25,34 @@ const char THINGSPEAK_REQUEST_TEMPLATE[] PROGMEM =
     "%s\r\n";
 
 bool _tspk_enabled = false;
-char * _tspk_queue[8] = {NULL};
+bool _tspk_clear = false;
+
+char * _tspk_queue[THINGSPEAK_FIELDS] = {NULL};
 
 bool _tspk_flush = false;
 unsigned long _tspk_last_flush = 0;
+unsigned char _tspk_tries = 0;
 
 // -----------------------------------------------------------------------------
+
+#if BROKER_SUPPORT
+void _tspkBrokerCallback(const unsigned char type, const char * topic, unsigned char id, const char * payload) {
+
+    // Process status messages
+    if (BROKER_MSG_TYPE_STATUS == type) {
+        tspkEnqueueRelay(id, (char *) payload);
+        tspkFlush();
+    }
+
+    // Porcess sensor messages
+    if (BROKER_MSG_TYPE_SENSOR == type) {
+        //tspkEnqueueMeasurement(id, (char *) payload);
+        //tspkFlush();
+    }
+
+}
+#endif // BROKER_SUPPORT
+
 
 #if WEB_SUPPORT
 
@@ -44,6 +66,7 @@ void _tspkWebSocketOnSend(JsonObject& root) {
 
     root["tspkEnabled"] = getSetting("tspkEnabled", THINGSPEAK_ENABLED).toInt() == 1;
     root["tspkKey"] = getSetting("tspkKey");
+    root["tspkClear"] = getSetting("tspkClear", THINGSPEAK_CLEAR_CACHE).toInt() == 1;
 
     JsonArray& relays = root.createNestedArray("tspkRelays");
     for (byte i=0; i<relayCount(); i++) {
@@ -52,15 +75,8 @@ void _tspkWebSocketOnSend(JsonObject& root) {
     if (relayCount() > 0) visible = 1;
 
     #if SENSOR_SUPPORT
-        JsonArray& list = root.createNestedArray("tspkMagnitudes");
-        for (byte i=0; i<magnitudeCount(); i++) {
-            JsonObject& element = list.createNestedObject();
-            element["name"] = magnitudeName(i);
-            element["type"] = magnitudeType(i);
-            element["index"] = magnitudeIndex(i);
-            element["idx"] = getSetting("tspkMagnitude", i, 0).toInt();
-        }
-        if (magnitudeCount() > 0) visible = 1;
+        _sensorWebSocketMagnitudes(root, "tspk");
+        visible = visible || (magnitudeCount() > 0);
     #endif
 
     root["tspkVisible"] = visible;
@@ -70,6 +86,7 @@ void _tspkWebSocketOnSend(JsonObject& root) {
 #endif
 
 void _tspkConfigure() {
+    _tspk_clear = getSetting("tspkClear", THINGSPEAK_CLEAR_CACHE).toInt() == 1;
     _tspk_enabled = getSetting("tspkEnabled", THINGSPEAK_ENABLED).toInt() == 1;
     if (_tspk_enabled && (getSetting("tspkKey").length() == 0)) {
         _tspk_enabled = false;
@@ -97,12 +114,23 @@ void _tspkPost(String data) {
     }, 0);
 
     _tspk_client->onData([](void * arg, AsyncClient * c, void * response, size_t len) {
+
         char * b = (char *) response;
         b[len] = 0;
         char * p = strstr((char *)response, "\r\n\r\n");
         unsigned int code = (p != NULL) ? atoi(&p[4]) : 0;
         DEBUG_MSG_P(PSTR("[THINGSPEAK] Response value: %d\n"), code);
+
+        _tspk_last_flush = millis();
+        if ((0 == code) && (--_tspk_tries > 0)) {
+            _tspk_flush = true;
+            DEBUG_MSG_P(PSTR("[THINGSPEAK] Re-enqueuing\n"));
+        } else {
+            _tspkClearQueue();
+        }
+
         _tspk_client->close(true);
+
     }, NULL);
 
     _tspk_client->onConnect([data](void * arg, AsyncClient * client) {
@@ -118,7 +146,7 @@ void _tspkPost(String data) {
             }
         #endif
 
-        DEBUG_MSG_P(PSTR("[THINGSPEAK] POST %s\n"), data.c_str());
+        DEBUG_MSG_P(PSTR("[THINGSPEAK] POST %s?%s\n"), THINGSPEAK_URL, data.c_str());
 
         char buffer[strlen_P(THINGSPEAK_REQUEST_TEMPLATE) + strlen(THINGSPEAK_URL) + strlen(THINGSPEAK_HOST) + data.length()];
         snprintf_P(buffer, sizeof(buffer),
@@ -164,7 +192,7 @@ void _tspkPost(String data) {
             DEBUG_MSG_P(PSTR("[THINGSPEAK] Warning: certificate doesn't match\n"));
         }
 
-        DEBUG_MSG_P(PSTR("[THINGSPEAK] POST %s\n"), data.c_str());
+        DEBUG_MSG_P(PSTR("[THINGSPEAK] POST %s?%s\n"), THINGSPEAK_URL, data.c_str());
         char buffer[strlen_P(THINGSPEAK_REQUEST_TEMPLATE) + strlen(THINGSPEAK_URL) + strlen(THINGSPEAK_HOST) + data.length()];
         snprintf_P(buffer, sizeof(buffer),
             THINGSPEAK_REQUEST_TEMPLATE,
@@ -182,6 +210,15 @@ void _tspkPost(String data) {
         unsigned int code = (pos > 0) ? response.substring(pos + 4).toInt() : 0;
         DEBUG_MSG_P(PSTR("[THINGSPEAK] Response value: %d\n"), code);
         _tspk_client.stop();
+
+        _tspk_last_flush = millis();
+        if ((0 == code) && (--_tspk_tries > 0)) {
+            _tspk_flush = true;
+            DEBUG_MSG_P(PSTR("[THINGSPEAK] Re-enqueuing\n"));
+        } else {
+            _tspkClearQueue();
+        }
+
         return;
 
     }
@@ -199,36 +236,45 @@ void _tspkEnqueue(unsigned char index, char * payload) {
     _tspk_queue[index] = strdup(payload);
 }
 
+void _tspkClearQueue() {
+    if (_tspk_clear) {
+        for (unsigned char id=0; id<THINGSPEAK_FIELDS; id++) {
+            if (_tspk_queue[id] != NULL) {
+                free(_tspk_queue[id]);
+                _tspk_queue[id] = NULL;
+            }
+        }
+    }
+}
+
 void _tspkFlush() {
 
-    String data;
+    _tspk_flush = false;
 
     // Walk the fields
-    for (unsigned char id=0; id<8; id++) {
+    String data;
+    for (unsigned char id=0; id<THINGSPEAK_FIELDS; id++) {
         if (_tspk_queue[id] != NULL) {
             if (data.length() > 0) data = data + String("&");
             data = data + String("field") + String(id+1) + String("=") + String(_tspk_queue[id]);
-            free(_tspk_queue[id]);
-            _tspk_queue[id] = NULL;
         }
     }
 
     // POST data if any
     if (data.length() > 0) {
         data = data + String("&api_key=") + getSetting("tspkKey");
+        _tspk_tries = THINGSPEAK_TRIES;
         _tspkPost(data);
-        _tspk_last_flush = millis();
     }
 
 }
+
 // -----------------------------------------------------------------------------
 
-bool tspkEnqueueRelay(unsigned char index, unsigned char status) {
+bool tspkEnqueueRelay(unsigned char index, char * payload) {
     if (!_tspk_enabled) return true;
     unsigned char id = getSetting("tspkRelay", index, 0).toInt();
     if (id > 0) {
-        char payload[3] = {0};
-        itoa(status ? 1 : 0, payload, 10);
         _tspkEnqueue(id, payload);
         return true;
     }
@@ -259,8 +305,11 @@ void tspkSetup() {
 
     #if WEB_SUPPORT
         wsOnSendRegister(_tspkWebSocketOnSend);
-        wsOnAfterParseRegister(_tspkConfigure);
         wsOnReceiveRegister(_tspkWebSocketOnReceive);
+    #endif
+
+    #if BROKER_SUPPORT
+        brokerRegister(_tspkBrokerCallback);
     #endif
 
     DEBUG_MSG_P(PSTR("[THINGSPEAK] Async %s, SSL %s\n"),
@@ -268,8 +317,9 @@ void tspkSetup() {
         THINGSPEAK_USE_SSL ? "ENABLED" : "DISABLED"
     );
 
-    // Register loop
+    // Main callbacks
     espurnaRegisterLoop(tspkLoop);
+    espurnaRegisterReload(_tspkConfigure);
 
 }
 
@@ -278,7 +328,6 @@ void tspkLoop() {
     if (!wifiConnected() || (WiFi.getMode() != WIFI_STA)) return;
     if (_tspk_flush && (millis() - _tspk_last_flush > THINGSPEAK_MIN_INTERVAL)) {
         _tspkFlush();
-        _tspk_flush = false;
     }
 }
 

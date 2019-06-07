@@ -9,8 +9,11 @@
 
 #define DEVICE_NAME             MANUFACTURER "_" DEVICE     // Concatenate both to get a unique device name
 
+// When defined, ADMIN_PASS must be 8..63 printable ASCII characters. See:
+// https://en.wikipedia.org/wiki/Wi-Fi_Protected_Access#Target_users_(authentication_key_distribution)
+// https://github.com/xoseperez/espurna/issues/1151
 #ifndef ADMIN_PASS
-#define ADMIN_PASS              "fibonacci"     // Default password (WEB, OTA, WIFI)
+#define ADMIN_PASS              "fibonacci"     // Default password (WEB, OTA, WIFI SoftAP)
 #endif
 
 #ifndef USE_PASSWORD
@@ -18,7 +21,11 @@
 #endif
 
 #ifndef LOOP_DELAY_TIME
-#define LOOP_DELAY_TIME         10              // Delay for this millis in the main loop [0-250]
+#define LOOP_DELAY_TIME         10              // Delay for the main loop, in millis [0-250]
+                                                // Recommended minimum is 10, see:
+                                                // https://github.com/xoseperez/espurna/issues/1541
+                                                // https://github.com/xoseperez/espurna/issues/1631
+                                                // https://github.com/esp8266/Arduino/issues/5825
 #endif
 
 //------------------------------------------------------------------------------
@@ -107,6 +114,10 @@
 #define TELNET_STA              0               // By default, disallow connections via STA interface
 #endif
 
+#ifndef TELNET_AUTHENTICATION
+#define TELNET_AUTHENTICATION   1               // Request password to start telnet session by default
+#endif
+
 #define TELNET_PORT             23              // Port to listen to telnet clients
 #define TELNET_MAX_CLIENTS      1               // Max number of concurrent telnet clients
 
@@ -141,7 +152,8 @@
 // EEPROM
 //------------------------------------------------------------------------------
 
-#define EEPROM_SIZE             4096            // EEPROM size in bytes
+#define EEPROM_SIZE             SPI_FLASH_SEC_SIZE  // EEPROM size in bytes (1 sector = 4096 bytes)
+
 //#define EEPROM_RORATE_SECTORS   2             // Number of sectors to use for EEPROM rotation
                                                 // If not defined the firmware will use a number based
                                                 // on the number of available sectors
@@ -155,35 +167,128 @@
 #define EEPROM_DATA_END         14              // End of custom EEPROM data block
 
 //------------------------------------------------------------------------------
+// THERMOSTAT
+//------------------------------------------------------------------------------
+
+#ifndef THERMOSTAT_SUPPORT
+#define THERMOSTAT_SUPPORT          0
+#endif
+
+#ifndef THERMOSTAT_DISPLAY_SUPPORT
+#define THERMOSTAT_DISPLAY_SUPPORT  0
+#endif
+
+#define THERMOSTAT_SERVER_LOST_INTERVAL  120000 //server means lost after 2 min from last response
+#define THERMOSTAT_REMOTE_TEMP_MAX_WAIT     120 // 2 min
+
+//------------------------------------------------------------------------------
 // HEARTBEAT
 //------------------------------------------------------------------------------
 
-#ifndef HEARTBEAT_ENABLED
-#define HEARTBEAT_ENABLED           1
+#define HEARTBEAT_NONE              0           // Never send heartbeat
+#define HEARTBEAT_ONCE              1           // Send it only once upon MQTT connection
+#define HEARTBEAT_REPEAT            2           // Send it upon MQTT connection and every HEARTBEAT_INTERVAL
+#define HEARTBEAT_REPEAT_STATUS     3           // Send it upon MQTT connection and every HEARTBEAT_INTERVAL only STATUS report
+
+// Backwards compatibility check
+#if defined(HEARTBEAT_ENABLED) && (HEARTBEAT_ENABLED == 0)
+#define HEARTBEAT_MODE              HEARTBEAT_NONE
+#endif
+
+#ifndef HEARTBEAT_MODE
+#define HEARTBEAT_MODE              HEARTBEAT_REPEAT
 #endif
 
 #ifndef HEARTBEAT_INTERVAL
-#define HEARTBEAT_INTERVAL          300000      // Interval between heartbeat messages (in ms)
+#define HEARTBEAT_INTERVAL          300         // Interval between heartbeat messages (in sec)
 #endif
 
 #define UPTIME_OVERFLOW             4294967295  // Uptime overflow value
 
-// Topics that will be reported in heartbeat
+// Values that will be reported in heartbeat
+#ifndef HEARTBEAT_REPORT_STATUS
 #define HEARTBEAT_REPORT_STATUS     1
+#endif
+
+#ifndef HEARTBEAT_REPORT_SSID
+#define HEARTBEAT_REPORT_SSID       1
+#endif
+
+#ifndef HEARTBEAT_REPORT_IP
 #define HEARTBEAT_REPORT_IP         1
+#endif
+
+#ifndef HEARTBEAT_REPORT_MAC
 #define HEARTBEAT_REPORT_MAC        1
+#endif
+
+#ifndef HEARTBEAT_REPORT_RSSI
 #define HEARTBEAT_REPORT_RSSI       1
+#endif
+
+#ifndef HEARTBEAT_REPORT_UPTIME
 #define HEARTBEAT_REPORT_UPTIME     1
+#endif
+
+#ifndef HEARTBEAT_REPORT_DATETIME
 #define HEARTBEAT_REPORT_DATETIME   1
+#endif
+
+#ifndef HEARTBEAT_REPORT_FREEHEAP
 #define HEARTBEAT_REPORT_FREEHEAP   1
+#endif
+
+#ifndef HEARTBEAT_REPORT_VCC
 #define HEARTBEAT_REPORT_VCC        1
+#endif
+
+#ifndef HEARTBEAT_REPORT_RELAY
 #define HEARTBEAT_REPORT_RELAY      1
+#endif
+
+#ifndef HEARTBEAT_REPORT_LIGHT
 #define HEARTBEAT_REPORT_LIGHT      1
+#endif
+
+#ifndef HEARTBEAT_REPORT_HOSTNAME
 #define HEARTBEAT_REPORT_HOSTNAME   1
+#endif
+
+#ifndef HEARTBEAT_REPORT_DESCRIPTION
+#define HEARTBEAT_REPORT_DESCRIPTION 1
+#endif
+
+#ifndef HEARTBEAT_REPORT_APP
 #define HEARTBEAT_REPORT_APP        1
+#endif
+
+#ifndef HEARTBEAT_REPORT_VERSION
 #define HEARTBEAT_REPORT_VERSION    1
+#endif
+
+#ifndef HEARTBEAT_REPORT_BOARD
 #define HEARTBEAT_REPORT_BOARD      1
+#endif
+
+#ifndef HEARTBEAT_REPORT_LOADAVG
+#define HEARTBEAT_REPORT_LOADAVG    1
+#endif
+
+#ifndef HEARTBEAT_REPORT_INTERVAL
 #define HEARTBEAT_REPORT_INTERVAL   0
+#endif
+
+#if THERMOSTAT_SUPPORT && ! defined HEARTBEAT_REPORT_RANGE
+#define HEARTBEAT_REPORT_RANGE      1
+#else
+#define HEARTBEAT_REPORT_RANGE      0
+#endif
+
+#if THERMOSTAT_SUPPORT && ! defined HEARTBEAT_REPORT_REMOTE_TEMP
+#define HEARTBEAT_REPORT_REMOTE_TEMP 1
+#else
+#define HEARTBEAT_REPORT_REMOTE_TEMP 0
+#endif
 
 //------------------------------------------------------------------------------
 // Load average
@@ -191,10 +296,6 @@
 
 #ifndef LOADAVG_INTERVAL
 #define LOADAVG_INTERVAL        30000           // Interval between calculating load average (in ms)
-#endif
-
-#ifndef LOADAVG_REPORT
-#define LOADAVG_REPORT          1               // Should we report Load average over MQTT?
 #endif
 
 //------------------------------------------------------------------------------
@@ -219,6 +320,19 @@
 
 #ifndef BUTTON_LNGLNGCLICK_DELAY
 #define BUTTON_LNGLNGCLICK_DELAY    10000       // Time in ms holding the button down to get a long-long click
+#endif
+
+#ifndef BUTTON_MQTT_SEND_ALL_EVENTS
+#define BUTTON_MQTT_SEND_ALL_EVENTS 0           // 0 - to send only events the are bound to actions
+                                                // 1 - to send all button events to MQTT
+#endif
+
+//------------------------------------------------------------------------------
+// ENCODER
+//------------------------------------------------------------------------------
+
+#ifndef ENCODER_SUPPORT
+#define ENCODER_SUPPORT             0
 #endif
 
 //------------------------------------------------------------------------------
@@ -273,6 +387,23 @@
 #define RELAY_SAVE_DELAY            1000
 #endif
 
+#ifndef RELAY_REPORT_STATUS
+#define RELAY_REPORT_STATUS         1
+#endif
+
+// Configure the MQTT payload for ON/OFF
+#ifndef RELAY_MQTT_ON
+#define RELAY_MQTT_ON               "1"
+#endif
+#ifndef RELAY_MQTT_OFF
+#define RELAY_MQTT_OFF              "0"
+#endif
+
+// TODO Only single EEPROM address is used to store state, which is 1 byte
+// Relay status is stored using bitfield.
+// This means that, atm, we are only storing the status of the first 8 relays.
+#define RELAY_SAVE_MASK_MAX         8
+
 // -----------------------------------------------------------------------------
 // WIFI
 // -----------------------------------------------------------------------------
@@ -293,6 +424,9 @@
 #define WIFI_AP_CAPTIVE             1                   // Captive portal enabled when in AP mode
 #endif
 
+#ifndef WIFI_FALLBACK_APMODE
+#define WIFI_FALLBACK_APMODE        1                   // Fallback to AP mode if no STA connection
+#endif
 
 #ifndef WIFI_SLEEP_MODE
 #define WIFI_SLEEP_MODE             WIFI_NONE_SLEEP     // WIFI_NONE_SLEEP, WIFI_LIGHT_SLEEP or WIFI_MODEM_SLEEP
@@ -396,7 +530,9 @@
 // or in the Internet. Since the WebUI is just one compressed file with HTML, CSS and JS
 // there are no special requirements. Any static web server will do (NGinx, Apache, Lighttpd,...).
 // The only requirement is that the resource must be available under this domain.
-#define WEB_REMOTE_DOMAIN           "http://tinkerman.cat"
+#ifndef WEB_REMOTE_DOMAIN
+#define WEB_REMOTE_DOMAIN           "http://espurna.io"
+#endif
 
 // -----------------------------------------------------------------------------
 // WEBSOCKETS
@@ -423,9 +559,18 @@
 // API
 // -----------------------------------------------------------------------------
 
+#ifndef API_SUPPORT
+#define API_SUPPORT                 1           // API (REST & RPC) support built in
+#endif
+
 // This will only be enabled if WEB_SUPPORT is 1 (this is the default value)
 #ifndef API_ENABLED
 #define API_ENABLED                 0           // Do not enable API by default
+#endif
+
+#ifndef API_RESTFUL
+#define API_RESTFUL                 1           // A restful API requires changes to be issued as PUT requests
+                                                // Setting this to 0 will allow using GET to change relays, for instance
 #endif
 
 #ifndef API_BUFFER_SIZE
@@ -482,6 +627,10 @@
 
 #ifndef OTA_PORT
 #define OTA_PORT                    8266        // OTA port
+#endif
+
+#ifndef OTA_MQTT_SUPPORT
+#define OTA_MQTT_SUPPORT           0            // No support by default
 #endif
 
 #define OTA_GITHUB_FP               "D7:9F:07:61:10:B3:92:93:E3:49:AC:89:84:5B:03:80:C1:9E:2F:8B"
@@ -643,8 +792,14 @@
 #endif
 
 
-#ifndef MQTT_USE_JSON
-#define MQTT_USE_JSON               0               // Group messages in a JSON body
+#if THERMOSTAT_SUPPORT == 1
+    #ifndef MQTT_USE_JSON
+    #define MQTT_USE_JSON               1           // Group messages in a JSON body
+    #endif
+#else
+    #ifndef MQTT_USE_JSON
+    #define MQTT_USE_JSON               0           // Don't group messages in a JSON body (default)
+    #endif
 #endif
 
 #ifndef MQTT_USE_JSON_DELAY
@@ -684,6 +839,7 @@
 #define MQTT_TOPIC_LED              "led"
 #define MQTT_TOPIC_BUTTON           "button"
 #define MQTT_TOPIC_IP               "ip"
+#define MQTT_TOPIC_SSID             "ssid"
 #define MQTT_TOPIC_VERSION          "version"
 #define MQTT_TOPIC_UPTIME           "uptime"
 #define MQTT_TOPIC_DATETIME         "datetime"
@@ -696,6 +852,7 @@
 #define MQTT_TOPIC_APP              "app"
 #define MQTT_TOPIC_INTERVAL         "interval"
 #define MQTT_TOPIC_HOSTNAME         "host"
+#define MQTT_TOPIC_DESCRIPTION      "desc"
 #define MQTT_TOPIC_TIME             "time"
 #define MQTT_TOPIC_RFOUT            "rfout"
 #define MQTT_TOPIC_RFIN             "rfin"
@@ -707,6 +864,9 @@
 #define MQTT_TOPIC_BOARD            "board"
 #define MQTT_TOPIC_PULSE            "pulse"
 #define MQTT_TOPIC_SPEED            "speed"
+#define MQTT_TOPIC_IRIN             "irin"
+#define MQTT_TOPIC_IROUT            "irout"
+#define MQTT_TOPIC_OTA              "ota"
 
 // Light module
 #define MQTT_TOPIC_CHANNEL          "channel"
@@ -717,6 +877,17 @@
 #define MQTT_TOPIC_BRIGHTNESS       "brightness"
 #define MQTT_TOPIC_MIRED            "mired"
 #define MQTT_TOPIC_KELVIN           "kelvin"
+#define MQTT_TOPIC_TRANSITION       "transition"
+
+// Thermostat module
+#define MQTT_TOPIC_HOLD_TEMP        "hold_temp"
+#define MQTT_TOPIC_HOLD_TEMP_MIN    "min"
+#define MQTT_TOPIC_HOLD_TEMP_MAX    "max"
+#define MQTT_TOPIC_REMOTE_TEMP      "remote_temp"
+#define MQTT_TOPIC_ASK_TEMP_RANGE   "ask_temp_range"
+#define MQTT_TOPIC_NOTIFY_TEMP_RANGE_MIN "notify_temp_range_min"
+#define MQTT_TOPIC_NOTIFY_TEMP_RANGE_MAX "notify_temp_range_max"
+
 
 #define MQTT_STATUS_ONLINE          "1"         // Value for the device ON message
 #define MQTT_STATUS_OFFLINE         "0"         // Value for the device OFF message (will)
@@ -749,7 +920,7 @@
 // -----------------------------------------------------------------------------
 
 #ifndef SETTINGS_AUTOSAVE
-#define SETTINGS_AUTOSAVE       1           // Autosave settings o force manual commit
+#define SETTINGS_AUTOSAVE       1           // Autosave settings or force manual commit
 #endif
 
 #define SETTINGS_MAX_LIST_COUNT 10          // Maximum index for settings lists
@@ -770,6 +941,10 @@
 
 #ifndef LIGHT_SAVE_ENABLED
 #define LIGHT_SAVE_ENABLED      1           // Light channel values saved by default after each change
+#endif
+
+#ifndef LIGHT_COMMS_DELAY
+#define LIGHT_COMMS_DELAY       100         // Delay communication after light update (in ms)
 #endif
 
 #ifndef LIGHT_SAVE_DELAY
@@ -876,8 +1051,29 @@
 #define HOMEASSISTANT_SUPPORT   MQTT_SUPPORT    // Build with home assistant support (if MQTT, 1.64Kb)
 #endif
 
+#ifndef HOMEASSISTANT_ENABLED
 #define HOMEASSISTANT_ENABLED   0               // Integration not enabled by default
+#endif
+
+#ifndef HOMEASSISTANT_PREFIX
 #define HOMEASSISTANT_PREFIX    "homeassistant" // Default MQTT prefix
+#endif
+
+#ifndef HOMEASSISTANT_PAYLOAD_ON
+#define HOMEASSISTANT_PAYLOAD_ON    "1"         // Payload for ON and available messages
+#endif
+
+#ifndef HOMEASSISTANT_PAYLOAD_OFF
+#define HOMEASSISTANT_PAYLOAD_OFF   "0"         // Payload for OFF and unavailable messages
+#endif
+
+#ifndef HOMEASSISTANT_PAYLOAD_AVAILABLE
+#define HOMEASSISTANT_PAYLOAD_AVAILABLE     "1" // Payload for available messages
+#endif
+
+#ifndef HOMEASSISTANT_PAYLOAD_NOT_AVAILABLE
+#define HOMEASSISTANT_PAYLOAD_NOT_AVAILABLE "0" // Payload for available messages
+#endif
 
 // -----------------------------------------------------------------------------
 // INFLUXDB
@@ -928,6 +1124,11 @@
 #define THINGSPEAK_APIKEY           ""              // Default API KEY
 #endif
 
+#ifndef THINGSPEAK_CLEAR_CACHE
+#define THINGSPEAK_CLEAR_CACHE      1               // Clear cache after sending values
+                                                    // Not clearing it will result in latest values for each field being sent every time
+#endif
+
 #define THINGSPEAK_USE_ASYNC        1               // Use AsyncClient instead of WiFiClientSecure
 
 // THINGSPEAK OVER SSL
@@ -948,6 +1149,11 @@
 #define THINGSPEAK_URL              "/update"
 
 #define THINGSPEAK_MIN_INTERVAL     15000           // Minimum interval between POSTs (in millis)
+#define THINGSPEAK_FIELDS           8               // Number of fields
+
+#ifndef THINGSPEAK_TRIES
+#define THINGSPEAK_TRIES            3               // Number of tries when sending data (minimum 1)
+#endif
 
 // -----------------------------------------------------------------------------
 // SCHEDULER
@@ -1001,6 +1207,10 @@
 #define NTP_DST_REGION              0               // 0 for Europe, 1 for USA (defined in NtpClientLib)
 #endif
 
+#ifndef NTP_WAIT_FOR_SYNC
+#define NTP_WAIT_FOR_SYNC           1               // Do not report any datetime until NTP sync'ed
+#endif
+
 // -----------------------------------------------------------------------------
 // ALEXA
 // -----------------------------------------------------------------------------
@@ -1017,10 +1227,26 @@
 #define ALEXA_ENABLED               1
 #endif
 
+#ifndef ALEXA_HOSTNAME
+#define ALEXA_HOSTNAME              ""
+#endif
+
+
 // -----------------------------------------------------------------------------
-// RFBRIDGE
-// This module is not compatible with RF_SUPPORT=1
+// MQTT RF BRIDGE
 // -----------------------------------------------------------------------------
+
+#ifndef RF_SUPPORT
+#define RF_SUPPORT                  0
+#endif
+
+#ifndef RF_DEBOUNCE
+#define RF_DEBOUNCE                 500
+#endif
+
+#ifndef RF_LEARN_TIMEOUT
+#define RF_LEARN_TIMEOUT            60000
+#endif
 
 #ifndef RF_SEND_TIMES
 #define RF_SEND_TIMES               4               // How many times to send the message
@@ -1034,32 +1260,64 @@
 #define RF_RECEIVE_DELAY            500             // Interval between recieving in ms (avoid debouncing)
 #endif
 
+// Enable RCSwitch support
+// Also possible to use with SONOFF RF BRIDGE, thanks to @wildwiz
+// https://github.com/xoseperez/espurna/wiki/Hardware-Itead-Sonoff-RF-Bridge---Direct-Hack
+#ifndef RFB_DIRECT
+#define RFB_DIRECT                  0
+#endif
 
-#ifndef RF_RAW_SUPPORT
-#define RF_RAW_SUPPORT              0               // RF raw codes require a specific firmware for the EFM8BB1
-                                                // https://github.com/rhx/RF-Bridge-EFM8BB1
+#ifndef RFB_RX_PIN
+#define RFB_RX_PIN                  GPIO_NONE
+#endif
+
+#ifndef RFB_TX_PIN
+#define RFB_TX_PIN                  GPIO_NONE
 #endif
 
 
 // -----------------------------------------------------------------------------
-// IR
+// IR Bridge
 // -----------------------------------------------------------------------------
 
 #ifndef IR_SUPPORT
 #define IR_SUPPORT                  0               // Do not build with IR support by default (10.25Kb)
 #endif
 
-#ifndef IR_PIN
-#define IR_PIN                      4               // IR LED
+//#define IR_RX_PIN                   5               // GPIO the receiver is connected to
+//#define IR_TX_PIN                   4               // GPIO the transmitter is connected to
+
+#ifndef IR_USE_RAW
+#define IR_USE_RAW                  0               // Use raw codes
 #endif
 
-// 24 Buttons Set of the IR Remote
+#ifndef IR_BUFFER_SIZE
+#define IR_BUFFER_SIZE              1024
+#endif
+
+#ifndef IR_TIMEOUT
+#define IR_TIMEOUT                  15U
+#endif
+
+#ifndef IR_REPEAT
+#define IR_REPEAT                   1
+#endif
+
+#ifndef IR_DELAY
+#define IR_DELAY                    100
+#endif
+
+#ifndef IR_DEBOUNCE
+#define IR_DEBOUNCE                 500             // IR debounce time in milliseconds
+#endif
+
 #ifndef IR_BUTTON_SET
-#define IR_BUTTON_SET               1               // IR button set to use (see below)
+#define IR_BUTTON_SET               0               // IR button set to use (see below)
 #endif
 
-//Remote Buttons SET 1 (for the original Remote shipped with the controller)
-#if IR_SUPPORT
+// -----------------------------------------------------------------------------
+
+// Remote Buttons SET 1 (for the original Remote shipped with the controller)
 #if IR_BUTTON_SET == 1
 
 /*
@@ -1080,7 +1338,7 @@
 
     #define IR_BUTTON_COUNT 24
 
-    const unsigned long IR_BUTTON[IR_BUTTON_COUNT][3] PROGMEM = {
+    const uint32_t IR_BUTTON[IR_BUTTON_COUNT][3] PROGMEM = {
 
         { 0xFF906F, IR_BUTTON_MODE_BRIGHTER, 1 },
         { 0xFFB847, IR_BUTTON_MODE_BRIGHTER, 0 },
@@ -1205,25 +1463,29 @@
       //{ 0xE0E08877, IR_BUTTON_MODE_TOGGLE, 9 } //Extra Button
  };
 #endif
-#endif // IR_SUPPORT
 
-//--------------------------------------------------------------------------------
-// Custom RF module
-// Check http://tinkerman.cat/adding-rf-to-a-non-rf-itead-sonoff/
-// Enable support by passing RF_SUPPORT=1 build flag
-// This module is not compatible with RFBRIDGE or SONOFF RF
-//--------------------------------------------------------------------------------
+//Remote Buttons SET 4
+#if IR_BUTTON_SET == 4
+/*
+   +------+------+------+
+   | OFF  | SRC  | MUTE |
+   +------+------+------+
+   ...
+   +------+------+------+
+*/
+#define IR_BUTTON_COUNT 1
 
-#ifndef RF_SUPPORT
-#define RF_SUPPORT                  0
+ const unsigned long IR_BUTTON[IR_BUTTON_COUNT][3] PROGMEM = {
+
+        { 0xFFB24D, IR_BUTTON_MODE_TOGGLE, 0 } // Toggle Relay #0
+
+ };
+
 #endif
 
-#ifndef RF_PIN
-#define RF_PIN                      14
+#ifndef IR_BUTTON_COUNT
+#define IR_BUTTON_COUNT 0
 #endif
-
-#define RF_DEBOUNCE                 500
-#define RF_LEARN_TIMEOUT            60000
 
 //--------------------------------------------------------------------------------
 // Custom RFM69 to MQTT bridge
@@ -1239,16 +1501,20 @@
 #define RFM69_MAX_TOPICS            50
 #endif
 
+#ifndef RFM69_MAX_NODES
+#define RFM69_MAX_NODES             255
+#endif
+
 #ifndef RFM69_DEFAULT_TOPIC
 #define RFM69_DEFAULT_TOPIC         "/rfm69gw/{node}/{key}"
 #endif
 
 #ifndef RFM69_NODE_ID
-#define RFM69_NODE_ID               2
+#define RFM69_NODE_ID               1
 #endif
 
 #ifndef RFM69_GATEWAY_ID
-#define RFM69_GATEWAY_ID            2
+#define RFM69_GATEWAY_ID            1
 #endif
 
 #ifndef RFM69_NETWORK_ID
@@ -1256,7 +1522,7 @@
 #endif
 
 #ifndef RFM69_PROMISCUOUS
-#define RFM69_PROMISCUOUS           1
+#define RFM69_PROMISCUOUS           0
 #endif
 
 #ifndef RFM69_PROMISCUOUS_SENDS

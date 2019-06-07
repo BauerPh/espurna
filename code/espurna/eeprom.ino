@@ -8,7 +8,12 @@ EEPROM MODULE
 
 // -----------------------------------------------------------------------------
 
-bool eepromRotate(bool value) {
+bool _eeprom_commit = false;
+
+uint32_t _eeprom_commit_count = 0;
+bool _eeprom_last_commit_result = false;
+
+void eepromRotate(bool value) {
     // Enable/disable EEPROM rotation only if we are using more sectors than the
     // reserved by the memory layout
     if (EEPROMr.size() > EEPROMr.reserved()) {
@@ -21,6 +26,10 @@ bool eepromRotate(bool value) {
     }
 }
 
+uint32_t eepromCurrent() {
+    return EEPROMr.current();
+}
+
 String eepromSectors() {
     String response;
     for (uint32_t i = 0; i < EEPROMr.size(); i++) {
@@ -30,28 +39,62 @@ String eepromSectors() {
     return response;
 }
 
+void eepromSectorsDebug() {
+    DEBUG_MSG_P(PSTR("[MAIN] EEPROM sectors: %s\n"), (char *) eepromSectors().c_str());
+    DEBUG_MSG_P(PSTR("[MAIN] EEPROM current: %lu\n"), eepromCurrent());
+}
+
+bool _eepromCommit() {
+    _eeprom_commit_count++;
+    _eeprom_last_commit_result = EEPROMr.commit();
+    return _eeprom_last_commit_result;
+}
+
+void eepromCommit() {
+    _eeprom_commit = true;
+}
+
 #if TERMINAL_SUPPORT
 
 void _eepromInitCommands() {
 
-    settingsRegisterCommand(F("EEPROM.DUMP"), [](Embedis* e) {
-        EEPROMr.dump(settingsSerial());
-        DEBUG_MSG_P(PSTR("\n+OK\n"));
+    terminalRegisterCommand(F("EEPROM"), [](Embedis* e) {
+        infoMemory("EEPROM", SPI_FLASH_SEC_SIZE, SPI_FLASH_SEC_SIZE - settingsSize());
+        eepromSectorsDebug();
+        if (_eeprom_commit_count > 0) {
+            DEBUG_MSG_P(PSTR("[MAIN] Commits done: %lu\n"), _eeprom_commit_count);
+            DEBUG_MSG_P(PSTR("[MAIN]  Last result: %s\n"), _eeprom_last_commit_result ? "OK" : "ERROR");
+        }
+        terminalOK();
     });
 
-    settingsRegisterCommand(F("FLASH.DUMP"), [](Embedis* e) {
+    terminalRegisterCommand(F("EEPROM.COMMIT"), [](Embedis* e) {
+        const bool res = _eepromCommit();
+        if (res) {
+            terminalOK();
+        } else {
+            DEBUG_MSG_P(PSTR("-ERROR\n"));
+        }
+    });
+
+    terminalRegisterCommand(F("EEPROM.DUMP"), [](Embedis* e) {
+        EEPROMr.dump(terminalSerial());
+        terminalOK();
+    });
+
+    terminalRegisterCommand(F("FLASH.DUMP"), [](Embedis* e) {
         if (e->argc < 2) {
-            DEBUG_MSG_P(PSTR("-ERROR: Wrong arguments\n"));
+            terminalError(F("Wrong arguments"));
             return;
         }
         uint32_t sector = String(e->argv[1]).toInt();
         uint32_t max = ESP.getFlashChipSize() / SPI_FLASH_SEC_SIZE;
         if (sector >= max) {
-            DEBUG_MSG_P(PSTR("-ERROR: Sector out of range\n"));
+            terminalError(F("Sector out of range"));
             return;
         }
-        EEPROMr.dump(settingsSerial(), sector);
-        DEBUG_MSG_P(PSTR("\n+OK\n"));
+        EEPROMr.dump(terminalSerial(), sector);
+        terminalOK();
     });
 
 }
@@ -59,6 +102,13 @@ void _eepromInitCommands() {
 #endif
 
 // -----------------------------------------------------------------------------
+
+void eepromLoop() {
+    if (_eeprom_commit) {
+        _eepromCommit();
+        _eeprom_commit = false;
+    }
+}
 
 void eepromSetup() {
 
@@ -82,5 +132,7 @@ void eepromSetup() {
     #if TERMINAL_SUPPORT
         _eepromInitCommands();
     #endif
+
+    espurnaRegisterLoop(eepromLoop);
 
 }
